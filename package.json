@@ -1,0 +1,40 @@
+{
+  "name": "@wonderlandlabs/rollup-starter-kit",
+  "version": "1.0.0",
+  "description": "A rollup setup for modules",
+  "main": "lib/index.js",
+  "module": "es/index.js",
+  "files": [
+    "es",
+    "lib",
+    "umd"
+  ],
+  "scripts": {
+    "test!": "tap test test/* --reporter=specy",
+    "test": "yarn build; yarn test!",
+    "build": "node_modules/rollup/dist/bin/rollup -c='rollup.config.js'"
+  },
+  "dependencies": {
+    "@wonderlandlabs/propper": "^3.0.0",
+    "babel-eslint": "^10.0.3",
+    "eslint-plugin-react-hooks": "^2.1.1",
+    "is": "^3.3.0",
+    "lodash": "^4.17.15",
+    "rxjs": "^6.5.4"
+  },
+  "devDependencies": {
+    "eslint": "^6.3.0",
+    "eslint-config-airbnb": "^18.0.1",
+    "eslint-plugin-import": "^2.18.2",
+    "eslint-plugin-jsx-a11y": "^6.2.3",
+    "eslint-plugin-react": "^7.14.3",
+    "rollup": "^1.22.0",
+    "rollup-plugin-commonjs": "^10.1.0",
+    "rollup-plugin-node-resolve": "^5.2.0",
+    "rollup-plugin-terser": "^5.1.2",
+    "tap": "^14.6.1"
+  },
+  "author": "David Edelhart",
+  "license": "MIT",
+  "repository": "https://github.com/bingomanatee/rollup-starter-kit"
+}
