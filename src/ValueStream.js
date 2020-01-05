@@ -157,7 +157,7 @@ class ValueStream {
     this._value = ABSENT;
 
     if (name) {
-      this.add(name, value, type);
+      this.property(name, value, type);
     }
     // else the value is extinguished
   }
@@ -169,10 +169,29 @@ class ValueStream {
     return this._children;
   }
 
-  add(name, value, type) {
+  /**
+   * define a value to observe. This is a multi-value method.
+   * This method creates a sub-stream that is itself a value stream and puts it in a map as a
+   * child of this stream.
+   *
+   * NOTE: at this point there is no predicted behavior of deeply nested ValueStreams.
+   * This will be added in the near future possibly but to date, all use cases have been focusing
+   * on one-level value streams.
+   *
+   * @param name {String}
+   * @param value {var}
+   * @param type {String}?
+   * @returns {ValueStream}
+   */
+  property(name, value, type) {
     if (this.isSingleValue) {
-      throw new Error('cannot add sub-streams to stream with an single value');
+      throw new Error('cannot property sub-streams to stream with an single value');
     }
+
+    if (name instanceof ValueStream) {
+      return this.property(name.name, name);
+    }
+
     if (!(name && is.string(name))) {
       throw new Error(`cannot add to ${this.name} - bad name ${name}`);
     }
@@ -180,7 +199,7 @@ class ValueStream {
       throw new Error(`cannot add to ${this.name} - bad name ${name} -- bad javaScript property`);
     }
 
-    const subStream = new ValueStream(name, value, type);
+    const subStream = (value instanceof ValueStream) ? value : new ValueStream(name, value, type);
     subStream.parent = this;
     // cascade child errors and updates to parents streams
     subStream._changes.subscribe((change) => {
@@ -192,8 +211,8 @@ class ValueStream {
 
     this.children.set(name, subStream);
 
-    // add set method
-    this.define(capFirst(name, 'set'), (stream, value2 = ABSENT) => {
+    // property set method
+    this.method(capFirst(name, 'set'), (stream, value2 = ABSENT) => {
       if (!(value2 === ABSENT)) {
         stream.set(name, value2);
       }
@@ -244,7 +263,7 @@ class ValueStream {
     if (!this.children.has(name)) {
       console.log('attempt to get unknown child value', name);
     } else {
-      this.children.get(name).value;
+      return this.children.get(name).value;
     }
   }
 
@@ -257,15 +276,15 @@ class ValueStream {
    * @param transact {boolean}
    * @returns {this}
    */
-  define(actionName, fn, transact = false) {
+  method(actionName, fn, transact = false) {
     if (!(actionName && is.string(actionName))) {
-      throw new Error('define requires a string as the first parameter');
+      throw new Error('method requires a string as the first parameter');
     }
     if (!propRE.test(actionName)) {
       throw new Error(`the action name ${actionName} is not a valid javaScript property`);
     }
     if (!is.fn(fn)) {
-      throw new Error('define requires a function as the second parameter');
+      throw new Error('method requires a function as the second parameter');
     }
 
     if (this._actions.has(actionName)) {
@@ -284,7 +303,7 @@ class ValueStream {
    * @returns {ValueStream}
    */
   addAction(...args) {
-    return this.define(...args);
+    return this.method(...args);
   }
 
   /**
