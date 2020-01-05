@@ -20,17 +20,18 @@ const SCALAR_TYPES = [
 
 /**
  * A note on streams:
- * the 'error' in the observable trilogy of `.subsccribe(next, error, complete)` is intended to be a terminal error,
+ * the 'error' in the observable trilogy of `.subscribe(next, error, complete)` is intended to be a terminal error,
  * immediately preceding a shutdown.
  * ValueStreams bend over backwards to ensure this never occurs in ordinary execution; therefore,
  * the error observer gets _managed_ errors that are created when you try to set a value, or when an action
  * throws an error that we have caught.
  *
- * _subject
- *   This is a polymorphic value. For singleSubject streams it gets each value update.
- *   For streams with children, it gets a repeated emission of the stream itself.
- *   This reason it doesn't emit a serialization of the value tree is to reduce
- *   wastes of computing resources continuously serializing potentially large trees.
+ * _current
+ *   This is a polymorphic value.
+ *   * For singleSubject streams:  it gets each value update.
+ *   * For streams with children: it gets a repeated emission of the stream itself.
+ *                                to reduce wastes of computing resources by
+ *                                continuously serializing potentially large trees.
  *
  * _changes
  *   This stream emits a pairwise stream of changes from a single value stream.
@@ -48,7 +49,6 @@ class ValueStream {
     this.name = name;
     this._errors = new Subject();
     this._value = value;
-    this._actions = new Map();
     this.do = {};
 
     if (this.isSingleValue) {
@@ -59,6 +59,14 @@ class ValueStream {
         this._type = type;
       }
     }
+  }
+
+  get _actions() {
+    if (!this.__actions) {
+      this.__actions = new Map();
+    }
+
+    return this.__actions;
   }
 
   get type() {
@@ -85,18 +93,18 @@ class ValueStream {
   }
 
   /**
-   * every time the value (or a child value) changes, emit a new subject.
-   * That subject is not a function (directly) of the change.
+   * _current reflects the latest value of a ValueStream a la redux actions.
+   * It is triggered buy the _changes stream to emit an update.
    * //@TODO: integrate transactions
    * @returns {BehaviorSubject<{value: (var|ABSENT)}|ValueStream>}
    * @private
    */
-  get _subject() {
-    if (!this.__subject) {
-      this.__subject = new BehaviorSubject(this._subjectValue());
-      this._changes.subscribe(() => this.__subject.next(this._subjectValue()));
+  get _current() {
+    if (!this.___current) {
+      this.___current = new BehaviorSubject(this._subjectValue());
+      this._changes.subscribe(() => this.___current.next(this._subjectValue()));
     }
-    return this.__subject;
+    return this.___current;
   }
 
   /**
@@ -176,13 +184,10 @@ class ValueStream {
     subStream.parent = this;
     // cascade child errors and updates to parents streams
     subStream._changes.subscribe((change) => {
-      this._changes.next({ child: name, change });
-    }, (error) => {
-      console.log('===== substream error: ', error);
-      this.emitError({ child: name, error });
+      this._changes.next({ ...change, source: name, target: this.name });
     });
     subStream.subscribe(() => {}, (error) => {
-      this.emitError({ child: name, error });
+      this.emitError({ ...error, source: name, target: this.name });
     });
 
     this.children.set(name, subStream);
@@ -214,9 +219,8 @@ class ValueStream {
     if (this.hasType()) {
       if (!is[this.type](value)) {
         this.emitError({
-          error: 'wrong type',
+          message: 'wrong type',
           value,
-          target: this.id,
         });
         return;
       }
@@ -392,7 +396,7 @@ class ValueStream {
     // combines the subject stream and the error stream into a single stream
 
     const sub = merge(
-      this._subject.pipe(map(() => ({ type: 'value', message: this }))),
+      this._current.pipe(map(() => ({ type: 'value', message: this }))),
       this._errors.pipe(map((error) => ({ type: 'error', message: error }))),
     );
 
@@ -430,8 +434,8 @@ class ValueStream {
   }
 
   complete() {
-    if (this._subject) {
-      this._subject.complete();
+    if (this._current) {
+      this._current.complete();
     }
     if (this._errors) {
       this._errors.complete();

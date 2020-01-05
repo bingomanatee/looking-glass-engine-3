@@ -124,11 +124,9 @@ tap.test(p.name, (suite) => {
           } = result;
 
           badValue.same(values, [1, 2], 'values are [1, 2]');
-          badValue.same(errors, [{
-            error: { error: 'wrong type', value: 'nutless monkey', target: 'num' },
-            id: 'num',
-            name: 'num',
-          }], 'has error');
+
+          badValue.same(errors, [{ error: { message: 'wrong type', value: 'nutless monkey' }, id: 'num', name: 'num' }],
+            'has error');
           badValue.same(done, false, 'not done');
 
           stream.complete();
@@ -138,7 +136,7 @@ tap.test(p.name, (suite) => {
           badValue.end();
         });
 
-        tvsSubSingle.test('with bad value change can continue', (badValue) => {
+        tvsSubSingle.test('with bad value change can continue', (bvContinue) => {
           const stream = new ValueStream('num', 1, 'number');
 
           const result = monitorSingle(stream);
@@ -150,19 +148,17 @@ tap.test(p.name, (suite) => {
             errors, values,
           } = result;
 
-          badValue.same(values, [1, 2, 3]);
-          badValue.same(errors, [{
-            error: { error: 'wrong type', value: 'nutless monkey', target: 'num' },
-            id: 'num',
-            name: 'num',
-          }], 'has error');
-          badValue.same(result.done, false);
+          bvContinue.same(values, [1, 2, 3]);
+          bvContinue.same(errors,
+            [{ error: { message: 'wrong type', value: 'nutless monkey' }, id: 'num', name: 'num' }],
+            'has error');
+          bvContinue.same(result.done, false);
 
           stream.complete();
 
-          badValue.same(result.done, true, 'done');
+          bvContinue.same(result.done, true, 'done');
 
-          badValue.end();
+          bvContinue.end();
         });
         tvsSubSingle.end();
       });
@@ -223,12 +219,11 @@ tap.test(p.name, (suite) => {
           badValue.same(values, [{ x: 0, y: 0 }, { x: 2, y: 0 }], 'has coords');
           badValue.same(errors, [{
             error: {
-              child: 'y',
-              error: {
-                error: { error: 'wrong type', value: 'nutless monkey', target: 'coord.y' },
-                id: 'coord.y',
-                name: 'y',
-              },
+              error: { message: 'wrong type', value: 'nutless monkey' },
+              id: 'coord.y',
+              name: 'y',
+              source: 'y',
+              target: 'coord',
             },
             id: 'coord',
             name: 'coord',
@@ -257,12 +252,11 @@ tap.test(p.name, (suite) => {
 
             canContinue.same(errors, [{
               error: {
-                child: 'y',
-                error: {
-                  error: { error: 'wrong type', value: 'nutless monkey', target: 'coord.y' },
-                  id: 'coord.y',
-                  name: 'y',
-                },
+                error: { message: 'wrong type', value: 'nutless monkey' },
+                id: 'coord.y',
+                name: 'y',
+                source: 'y',
+                target: 'coord',
               },
               id: 'coord',
               name: 'coord',
