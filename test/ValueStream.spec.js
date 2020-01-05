@@ -89,15 +89,19 @@ tap.test(p.name, (suite) => {
 
         tvsSubSingle.test('with value change', (tvsValueChange) => {
           const stream = new ValueStream('num', 1, 'number');
+          stream._changes.subscribe((change) => {
+            console.log('wvc change: ', change);
+          });
 
           const result = monitorSingle(stream);
-          stream.next(2);
+          stream.set(2);
+          stream.set(3);
 
           const {
             errors, values,
           } = result;
 
-          tvsValueChange.same(values, [1, 2], 'values are [1, 2]');
+          tvsValueChange.same(values, [1, 2, 3], 'values are [1, 2, 3]');
           tvsValueChange.same(errors, [], 'no errors');
           tvsValueChange.same(result.done, false, 'not done');
 
@@ -112,8 +116,8 @@ tap.test(p.name, (suite) => {
           const stream = new ValueStream('num', 1, 'number');
 
           const result = monitorSingle(stream);
-          stream.next(2);
-          stream.next('nutless monkey');
+          stream.set(2);
+          stream.set('nutless monkey');
 
           const {
             errors, values, done,
@@ -138,9 +142,9 @@ tap.test(p.name, (suite) => {
           const stream = new ValueStream('num', 1, 'number');
 
           const result = monitorSingle(stream);
-          stream.next(2);
-          stream.next('nutless monkey');
-          stream.next(3);
+          stream.set(2);
+          stream.set('nutless monkey');
+          stream.set(3);
 
           const {
             errors, values,
@@ -250,6 +254,7 @@ tap.test(p.name, (suite) => {
             } = result;
 
             canContinue.same(values, [{ x: 0, y: 0 }, { x: 2, y: 0 }, { x: 3, y: 0 }, { x: 3, y: 4 }], 'has coords');
+
             canContinue.same(errors, [{
               error: {
                 child: 'y',

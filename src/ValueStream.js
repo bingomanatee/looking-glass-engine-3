@@ -1,14 +1,41 @@
 /* eslint-disable no-param-reassign */
 import { proppify } from '@wonderlandlabs/propper';
 import { BehaviorSubject, Subject, merge } from 'rxjs';
-import { map, combineAll } from 'rxjs/operators';
+import { map, pairwise, distinct } from 'rxjs/operators';
 import is from 'is';
 import _ from 'lodash';
+import capFirst from './capFirst';
 
 const ABSENT = Symbol('ABSENT');
 const has = (v) => v && (v !== ABSENT);
 const propRE = /^[\w_][\w_\d]*$/;
+const SCALAR_TYPES = [
+  'string',
+  'number',
+  'int',
+  'integer',
+  'bool',
+  'boolean',
+];
 
+/**
+ * A note on streams:
+ * the 'error' in the observable trilogy of `.subsccribe(next, error, complete)` is intended to be a terminal error,
+ * immediately preceding a shutdown.
+ * ValueStreams bend over backwards to ensure this never occurs in ordinary execution; therefore,
+ * the error observer gets _managed_ errors that are created when you try to set a value, or when an action
+ * throws an error that we have caught.
+ *
+ * _subject
+ *   This is a polymorphic value. For singleSubject streams it gets each value update.
+ *   For streams with children, it gets a repeated emission of the stream itself.
+ *   This reason it doesn't emit a serialization of the value tree is to reduce
+ *   wastes of computing resources continuously serializing potentially large trees.
+ *
+ * _changes
+ *   This stream emits a pairwise stream of changes from a single value stream.
+ *
+ */
 class ValueStream {
   /**
    * note - only single-value streams accept more than one parameter;
@@ -25,16 +52,12 @@ class ValueStream {
     this.do = {};
 
     if (this.isSingleValue) {
-      this._subject = new BehaviorSubject(this.value);
-
       if (type && (!(type === ABSENT))) {
         if (!is.string(type)) {
           throw new Error(`bad type value for ${name}: ${type}`);
         }
         this._type = type;
       }
-    } else {
-      this._subject = new BehaviorSubject(this);
     }
   }
 
@@ -57,6 +80,58 @@ class ValueStream {
     return !(this._value === ABSENT);
   }
 
+  _subjectValue() {
+    return this.isSingleValue ? this.value : this;
+  }
+
+  /**
+   * every time the value (or a child value) changes, emit a new subject.
+   * That subject is not a function (directly) of the change.
+   * //@TODO: integrate transactions
+   * @returns {BehaviorSubject<{value: (var|ABSENT)}|ValueStream>}
+   * @private
+   */
+  get _subject() {
+    if (!this.__subject) {
+      this.__subject = new BehaviorSubject(this._subjectValue());
+      this._changes.subscribe(() => this.__subject.next(this._subjectValue()));
+    }
+    return this.__subject;
+  }
+
+  /**
+   * single value streams' _changes stream is a linear history of the changes of its' value.
+   * multi-value streams' _changes stream is a combination of the _changes streams of all the valueStreams children.
+   * @returns {Observable}
+   * @private
+   */
+  get _changes() {
+    let previous = ABSENT;
+
+    const changeMap = (value) => {
+      if (!(previous === ABSENT)) {
+        const prev = previous;
+        previous = value;
+        return { name: this.name, prev, value };
+      }
+      previous = value;
+      return { name: this.name, value };
+    };
+
+    if (!this.__changes) {
+      if (this.isSingleValue) {
+        if (SCALAR_TYPES.includes(this.type)) {
+          this.__changes = this.__changesBase.pipe(distinct(), map(changeMap));
+        } else {
+          this.__changes = this.__changesBase.pipe(map(changeMap));
+        }
+      } else {
+        this.__changes = new Subject(); // it is children's job to push changes into the subject
+      }
+    }
+    return this.__changes;
+  }
+
   /** ------------------- Properties ------------------- */
 
   /**
@@ -76,6 +151,7 @@ class ValueStream {
     if (name) {
       this.add(name, value, type);
     }
+    // else the value is extinguished
   }
 
   get children() {
@@ -85,31 +161,73 @@ class ValueStream {
     return this._children;
   }
 
-  add(name, value, type = ABSENT) {
+  add(name, value, type) {
     if (this.isSingleValue) {
       throw new Error('cannot add sub-streams to stream with an single value');
+    }
+    if (!(name && is.string(name))) {
+      throw new Error(`cannot add to ${this.name} - bad name ${name}`);
+    }
+    if (!propRE.test(name)) {
+      throw new Error(`cannot add to ${this.name} - bad name ${name} -- bad javaScript property`);
     }
 
     const subStream = new ValueStream(name, value, type);
     subStream.parent = this;
+    // cascade child errors and updates to parents streams
+    subStream._changes.subscribe((change) => {
+      this._changes.next({ child: name, change });
+    }, (error) => {
+      console.log('===== substream error: ', error);
+      this.emitError({ child: name, error });
+    });
+    subStream.subscribe(() => {}, (error) => {
+      this.emitError({ child: name, error });
+    });
+
     this.children.set(name, subStream);
 
-    // cascade child errors and updates to parents streams
-    subStream.subscribe(() => {
-      this.next(this);
-    }, (error) => {
-      this.emitError({
-        child: name,
-        error,
-      });
+    // add set method
+    this.define(capFirst(name, 'set'), (stream, value2 = ABSENT) => {
+      if (!(value2 === ABSENT)) {
+        stream.set(name, value2);
+      }
+      return stream.get(name);
     });
 
     return this;
   }
 
+  /**
+   * This is the raw value that has changed. Changes emits a complex type with metadata about the change
+   * @returns {Subject<T> | Subject<unknown>}
+   * @private
+   */
+  get __changesBase() {
+    if (!this.___changesBase) {
+      this.___changesBase = new Subject();
+    }
+    return this.___changesBase;
+  }
+
+  _update(value) {
+    if (this.hasType()) {
+      if (!is[this.type](value)) {
+        this.emitError({
+          error: 'wrong type',
+          value,
+          target: this.id,
+        });
+        return;
+      }
+    }
+    this._value = value;
+    this.__changesBase.next(value);
+  }
+
   set(alpha, beta) {
     if (this.isSingleValue) {
-      this.next(alpha);
+      this._update(alpha);
     } else if (!this.children.has(alpha)) {
       console.log('attempt to set unknown child value', alpha, 'with', beta);
     } else {
@@ -118,9 +236,18 @@ class ValueStream {
     return this;
   }
 
+  get(name) {
+    if (!this.children.has(name)) {
+      console.log('attempt to get unknown child value', name);
+    } else {
+      this.children.get(name).value;
+    }
+  }
+
   /* ---------------------- Methods ------------------------ */
   /**
    * A curried method to define an action.
+   *
    * @param actionName {String}
    * @param fn {function}
    * @param transact {boolean}
@@ -133,16 +260,16 @@ class ValueStream {
     if (!propRE.test(actionName)) {
       throw new Error(`the action name ${actionName} is not a valid javaScript property`);
     }
-    if (!is.func(fn)) {
+    if (!is.fn(fn)) {
       throw new Error('define requires a function as the second parameter');
     }
+
     if (this._actions.has(actionName)) {
       console.log(this.name, 'already has an action ', actionName);
-      return this;
+    } else {
+      this._actions.set(actionName, this.actionFactory(actionName, fn, transact));
+      this.do[actionName] = this._actions.get(actionName);
     }
-
-    this._actions.set(actionName, this.actionFactory(actionName, fn, transact));
-    this.do[actionName] = this._actions.get(actionName);
 
     return this;
   }
@@ -201,7 +328,7 @@ class ValueStream {
       if (Promise.resolve(fn) === fn) {
         return this.asyncPerform(actionName, fn, transact, params);
       }
-      if (is.func(fn)) {
+      if (is.fn(fn)) {
         const result = fn(this, ...params);
         if (result) {
           return this.perform(actionName, result, transact, params);
@@ -219,6 +346,30 @@ class ValueStream {
       return { error };
     }
   }
+
+  /* ---------------------- Value --------------------- */
+
+  toObject() {
+    return this.isSingleValue ? { value: this.value } : Array.from(this.children.keys())
+      .reduce((obj, key) => {
+        const child = this.children.get(key);
+        if (child.isSingleValue) {
+          obj[key] = child.value;
+        } else {
+          obj[key] = child.toObject();
+        }
+        return obj;
+      }, {});
+  }
+
+  get value() {
+    if (this.isSingleValue) {
+      return this._value;
+    }
+    return this.toObject();
+  }
+
+  /* --------------------- Observable methods ----------- */
 
   /**
    * Note - this
@@ -263,53 +414,6 @@ class ValueStream {
           console.log('strange message type for subscription to ', this.name, ':', type);
       }
     }, onError, onComplete);
-  }
-
-  /* ---------------------- Value --------------------- */
-
-  toObject() {
-    return this.isSingleValue ? { value: this.value } : Array.from(this.children.keys())
-      .reduce((obj, key) => {
-        const child = this.children.get(key);
-        if (child.isSingleValue) {
-          obj[key] = child.value;
-        } else {
-          obj[key] = child.toObject();
-        }
-        return obj;
-      }, {});
-  }
-
-  get value() {
-    if (this.isSingleValue) {
-      return this._value;
-    }
-    return this.toObject();
-  }
-
-  /* --------------------- Observable methods ----------- */
-
-  next(value = ABSENT) {
-    if (!this.isSingleValue) {
-      this._subject.next(this);
-      return;
-    }
-    if (this.hasType()) {
-      if (!is[this.type](value)) {
-        this.emitError({
-          error: 'wrong type',
-          value,
-          target: this.id,
-        });
-        return;
-      }
-    }
-    this._value = value;
-    this._subject.next();
-  }
-
-  error(error) {
-    this.emitError({ error });
   }
 
   emitError(params) {
