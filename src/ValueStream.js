@@ -1,10 +1,13 @@
 /* eslint-disable no-param-reassign */
 import { proppify } from '@wonderlandlabs/propper';
-import { BehaviorSubject, Subject, merge } from 'rxjs';
-import { map, pairwise, distinct } from 'rxjs/operators';
+import {
+  BehaviorSubject, Subject, merge, combineLatest,
+} from 'rxjs';
+import { map, distinct, filter } from 'rxjs/operators';
 import is from 'is';
 import _ from 'lodash';
 import capFirst from './capFirst';
+import Transaction from './Transaction';
 
 const ABSENT = Symbol('ABSENT');
 const has = (v) => v && (v !== ABSENT);
@@ -36,6 +39,10 @@ const SCALAR_TYPES = [
  * _changes
  *   This stream emits a pairwise stream of changes from a single value stream.
  *
+ * _transCount
+ *   This stream increments and decrements as transactions are created.
+ *   It is the count of open transactions in the _trans set;
+ *
  */
 class ValueStream {
   /**
@@ -46,6 +53,7 @@ class ValueStream {
    * @param type {String|ABSENT}
    */
   constructor(name, value = ABSENT, type = ABSENT) {
+    if (!name) name = `stream ${Math.random()}`;
     this.name = name;
     this._errors = new Subject();
     this._value = value;
@@ -61,12 +69,36 @@ class ValueStream {
     }
   }
 
-  get _actions() {
-    if (!this.__actions) {
-      this.__actions = new Map();
+  closeTransaction(trans) {
+    if (this._trans) {
+      this._trans.delete(trans);
+    }
+    this._transCount.next(this.countOfTransactions());
+  }
+
+  addTransaction(name, params) {
+    if (!this._trans) {
+      this._trans = new Set();
+    }
+    const trans = new Transaction({
+      name,
+      params,
+      target: this,
+    });
+
+    this._trans.add(trans);
+    this._transCount.next(this.countOfTransactions());
+
+    return trans;
+  }
+
+
+  get _methods() {
+    if (!this.___methods) {
+      this.___methods = new Map();
     }
 
-    return this.__actions;
+    return this.___methods;
   }
 
   get type() {
@@ -88,21 +120,34 @@ class ValueStream {
     return !(this._value === ABSENT);
   }
 
-  _subjectValue() {
+  /* ------------------------- streams ------------------------- */
+
+  _currentValue() {
     return this.isSingleValue ? this.value : this;
   }
 
   /**
    * _current reflects the latest value of a ValueStream a la redux actions.
-   * It is triggered buy the _changes stream to emit an update.
-   * //@TODO: integrate transactions
+   * It is triggered by
+   *
+   * 1. the _changes stream
+   * 2. changes in the count of transactions
+   *
+   * to emit an update WHEN there are changes AND there are not any active transactions
+   *
    * @returns {BehaviorSubject<{value: (var|ABSENT)}|ValueStream>}
    * @private
    */
   get _current() {
     if (!this.___current) {
-      this.___current = new BehaviorSubject(this._subjectValue());
-      this._changes.subscribe(() => this.___current.next(this._subjectValue()));
+      this.___current = new BehaviorSubject(this._currentValue());
+      this._currentSub = combineLatest(this._changes, this._transCount)
+        .pipe(
+          filter(([__, trans]) => (trans < 1)),
+        )
+        .subscribe(() => {
+          this.___current.next(this._currentValue());
+        });
     }
     return this.___current;
   }
@@ -138,6 +183,25 @@ class ValueStream {
       }
     }
     return this.__changes;
+  }
+
+  countOfTransactions() {
+    if (!this._trans) {
+      return 0;
+    }
+    let count = 0;
+    this._trans.forEach((value) => {
+      count += value.open ? 1 : 0;
+    });
+
+    return count;
+  }
+
+  get _transCount() {
+    if (!this.__transCount) {
+      this.__transCount = new BehaviorSubject(this.countOfTransactions());
+    }
+    return this.__transCount;
   }
 
   /** ------------------- Properties ------------------- */
@@ -205,7 +269,8 @@ class ValueStream {
     subStream._changes.subscribe((change) => {
       this._changes.next({ ...change, source: name, target: this.name });
     });
-    subStream.subscribe(() => {}, (error) => {
+    subStream.subscribe(() => {
+    }, (error) => {
       this.emitError({ ...error, source: name, target: this.name });
     });
 
@@ -262,9 +327,9 @@ class ValueStream {
   get(name) {
     if (!this.children.has(name)) {
       console.log('attempt to get unknown child value', name);
-    } else {
-      return this.children.get(name).value;
+      return undefined;
     }
+    return this.children.get(name).value;
   }
 
   /* ---------------------- Methods ------------------------ */
@@ -287,11 +352,11 @@ class ValueStream {
       throw new Error('method requires a function as the second parameter');
     }
 
-    if (this._actions.has(actionName)) {
+    if (this._methods.has(actionName)) {
       console.log(this.name, 'already has an action ', actionName);
     } else {
-      this._actions.set(actionName, this.actionFactory(actionName, fn, transact));
-      this.do[actionName] = this._actions.get(actionName);
+      this._methods.set(actionName, this.actionFactory(actionName, fn, transact));
+      this.do[actionName] = this._methods.get(actionName);
     }
 
     return this;
@@ -314,14 +379,36 @@ class ValueStream {
    * @returns {function(...[*]=): Promise<*|{error: *}|undefined|{error: *}>|{error}|undefined|{error}|{error: *}}
    */
   actionFactory(actionName, fn, transact = false) {
-    return (...args) => this.perform(actionName, fn, transact, args);
+    return (...args) => {
+      if (transact) {
+        const transaction = this.addTransaction(actionName, args);
+        const result = this.perform(actionName, fn, args);
+
+        if (Promise.resolve(result) === result) {
+          // delay the end of transaction to resolution of promise
+          return result.then((value) => {
+            transaction.complete();
+            return value;
+          })
+            .catch((error) => {
+              transaction.complete(error);
+              return error;
+            });
+        }
+        transaction.complete();
+
+        return result;
+      }
+
+      return this.perform(actionName, fn, args);
+    };
   }
 
-  async asyncPerform(actionName, promise, transact, params) {
+  async asyncPerform(actionName, promise, params) {
     try {
       const result = await (promise);
       if (result) {
-        return this.perform(actionName, result, transact, params);
+        return this.perform(actionName, result, params);
       }
       return null;
     } catch (error) {
@@ -341,20 +428,19 @@ class ValueStream {
    *
    * @param actionName {String}
    * @param fn {Function}
-   * @param transact {boolean} // @TODO make this do something
    * @param params {Array} optional arguments to function
    * returns the value returned by fn, or a promise of it
    */
-  perform(actionName, fn, transact = false, params = []) {
+  perform(actionName, fn, params = []) {
     try {
       // noinspection JSIncompatibleTypesComparison
       if (Promise.resolve(fn) === fn) {
-        return this.asyncPerform(actionName, fn, transact, params);
+        return this.asyncPerform(actionName, fn, params);
       }
       if (is.fn(fn)) {
         const result = fn(this, ...params);
         if (result) {
-          return this.perform(actionName, result, transact, params);
+          return this.perform(actionName, result, params);
         }
         return result;
       }
@@ -455,6 +541,15 @@ class ValueStream {
   complete() {
     if (this._current) {
       this._current.complete();
+    }
+    if (this._currentSub) {
+      this._currentSub.unsubscribe();
+    }
+    if (this._changes) {
+      this._changes.complete();
+    }
+    if (this._transCount) {
+      this._transCount.complete();
     }
     if (this._errors) {
       this._errors.complete();

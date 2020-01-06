@@ -77,7 +77,14 @@ function coordFactory() {
       }
       stream.do.setX(x + stream.get('x'));
       stream.do.setY(y + stream.get('y'));
-    });
+    })
+    .method('addAndPostT', (stream, x, y) => {
+      stream.do.add(x, y);
+      return stream.do.post();
+    }, true)
+    .method('addT', (stream, x, y) => {
+      stream.do.add(x, y);
+    }, true);
 
   return stream;
 }
@@ -337,6 +344,82 @@ tap.test(p.name, (suite) => {
         tvsMethodsSimple.same(stream.get('x'), -2, 'x is -2');
         tvsMethodsSimple.same(stream.get('y'), 4, 'y is 4');
         tvsMethodsSimple.end();
+      });
+
+      tvsMethods.test('simple, synchronous, transactional', async (tvsTrans) => {
+        const stream = coordFactory();
+        const monitor = monitorMulti(stream);
+
+        tvsTrans.same(stream.countOfTransactions(), 0);
+        stream.do.add(2, -4);
+        tvsTrans.same(stream.countOfTransactions(), 0);
+        tvsTrans.same(stream.get('x'), 2, 'x is 2');
+        tvsTrans.same(stream.get('y'), -4, 'y is -4');
+
+        tvsTrans.same(monitor.values, [
+          { x: 0, y: 0, saved: false },
+          { x: 2, y: 0, saved: false },
+          { x: 2, y: -4, saved: false },
+        ], 'add fires off two updates');
+
+        await stream.do.addT(3, 6);
+        tvsTrans.same(stream.countOfTransactions(), 0);
+
+        tvsTrans.same(monitor.values, [
+          { x: 0, y: 0, saved: false },
+          { x: 2, y: 0, saved: false },
+          { x: 2, y: -4, saved: false },
+          { x: 5, y: 2, saved: false },
+        ], 'add fires off one more updates');
+
+        tvsTrans.end();
+      });
+
+      tvsMethods.test('async, transactional', async (tvsTransAsync) => {
+        const stream = coordFactory();
+        const monitor = monitorMulti(stream);
+
+        tvsTransAsync.same(stream.countOfTransactions(), 0);
+        await stream.do.addAndPostT(3, 6);
+        tvsTransAsync.same(stream.countOfTransactions(), 0);
+
+        tvsTransAsync.same(monitor.values, [
+          { x: 0, y: 0, saved: false },
+          { x: 3, y: 6, saved: true },
+        ], 'fires off a single event after the async is done');
+
+        tvsTransAsync.end();
+      });
+
+      tvsMethods.test('async, transactional with errors', async (tvsTransAsync) => {
+        const stream = coordFactory();
+        const monitor = monitorMulti(stream);
+
+        tvsTransAsync.same(stream.countOfTransactions(), 0);
+        const result = await stream.do.addAndPostT(3, 6);
+        tvsTransAsync.same(result, {
+          saved: true, x: 3, y: 6, id: 1000,
+        }, 'still returns result');
+
+        const result2 = await stream.do.addAndPostT(-3, -6);
+        tvsTransAsync.same(result2, {
+          error: {
+            saved: false, x: 0, y: 0, message: 'x or y must be non-zero',
+          },
+        },
+        'still returns result');
+
+        await stream.do.addAndPostT(1, 1);
+        tvsTransAsync.same(stream.countOfTransactions(), 0);
+
+        tvsTransAsync.same(monitor.values, [
+          { x: 0, y: 0, saved: false },
+          { x: 3, y: 6, saved: true },
+          { x: 0, y: 0, saved: false },
+          { x: 1, y: 1, saved: true },
+        ], 'updates on and after error');
+
+        tvsTransAsync.end();
       });
 
       tvsMethods.test('async', async (tvtMethodAsync) => {
