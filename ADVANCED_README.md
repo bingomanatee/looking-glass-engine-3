@@ -80,11 +80,43 @@ visits.method('addToVisits', (stream, value) => {
 visits.do.addToVisits(3);
 // console.log('visits:', 3);
 ```
+
 2. **Linking LGE to React uses standard observable patterns.** ValueStreams 
    can be defined inside or externally to a React Component. As such, one or more
    React Components can share a view (say, for user management) or not (as a replacement
    for setState). 
    In both cases adapting the stream to a view is fundamentally the same:
+
+
+### Design philosophy
+
+Value stream is based on these fundamental ideas:
+
+1. Value streams both generate and track changes in one or multiple values.
+2. Subscriptions update when a change is made unless transactional locking is in place
+3. higher level methods can trigger change and other methods to orchestrate updates on the stream
+4. ValueStreams enforce a closed schema of properties that can be individually 
+
+ValueStreams are recursive; that is the same class that defines a collection of data
+defines the management of a single piece of data. At this point no testing has been done on 
+more than one level of recursion. 
+
+It follows the RxJS Observable pattern; state updates can be `.subscribe(change, error, done)` to.
+ 
+They also express OOP patterns with methods and properties. ValueStream instances have:
+* `set(value)` or `.set(propertyName, value)` setters
+* `get()` or `get(propertyName)` getters for value access. 
+* a `do` property that exposes custom methods: `stream.do.customMethod(...)`. 
+
+Custom methods can be synchronous or asynchronous. You can suppress mid-stage changes
+by adding transactional locking when defining the method. 
+
+Because ValueStreams are driven by change notifications, you can observe
+individual properties directly. 
+* `.watch(propertyName, onChange, onError, onDone)` passes an object with a signature `{value, prev, name}`
+to onChange. 
+* `.watchFlat(propertyName, (value, prev) => {...}, onError, onDone)` extends value and prev into 
+parameters.
 
 ### shared state
 
@@ -222,3 +254,13 @@ on the `._methods` property(a Map).
 
 * `this` doesn't have any defined meaning and should not 
   be used inside a method's function. 
+
+## property: my 
+
+This is a proxy getter where Proxies are available. The efficiency of .my as a property
+is it allows you to pluck a single sub-value without serializing the entire tree. 
+`myStrem.value.foo` serializes the entire collection which is a waste when only one subelement 
+is desired. 
+
+Where they are not (i.e., IE), and for single value streams, property.my is the same as 
+property.value.

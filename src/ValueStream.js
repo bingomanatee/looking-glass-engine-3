@@ -3,7 +3,9 @@ import { proppify } from '@wonderlandlabs/propper';
 import {
   BehaviorSubject, Subject, merge, combineLatest,
 } from 'rxjs';
-import { map, distinct, filter } from 'rxjs/operators';
+import {
+  map, distinct, filter, startWith,
+} from 'rxjs/operators';
 import is from 'is';
 import _ from 'lodash';
 import capFirst from './capFirst';
@@ -26,7 +28,7 @@ const SCALAR_TYPES = [
  * the 'error' in the observable trilogy of `.subscribe(next, error, complete)` is intended to be a terminal error,
  * immediately preceding a shutdown.
  * ValueStreams bend over backwards to ensure this never occurs in ordinary execution; therefore,
- * the error observer gets _managed_ errors that are created when you try to set a value, or when an action
+ * the error observer gets _managed_ errors that are created when you try to set a value, or when an method
  * throws an error that we have caught.
  *
  * _current
@@ -53,7 +55,9 @@ class ValueStream {
    * @param type {String|ABSENT}
    */
   constructor(name, value = ABSENT, type = ABSENT) {
-    if (!name) name = `stream ${Math.random()}`;
+    if (!name) {
+      name = `stream ${Math.random()}`;
+    }
     this.name = name;
     this._errors = new Subject();
     this._value = value;
@@ -133,23 +137,40 @@ class ValueStream {
    * 1. the _changes stream
    * 2. changes in the count of transactions
    *
-   * to emit an update WHEN there are changes AND there are not any active transactions
+   * to emit an update WHEN there are changes.
+   * It does not emit when there are active transactions.
    *
    * @returns {BehaviorSubject<{value: (var|ABSENT)}|ValueStream>}
    * @private
    */
   get _current() {
     if (!this.___current) {
-      this.___current = new BehaviorSubject(this._currentValue());
-      this._currentSub = combineLatest(this._changes, this._transCount)
+      this.___current = combineLatest(this._changes, this._transCount)
         .pipe(
           filter(([__, trans]) => (trans < 1)),
-        )
-        .subscribe(() => {
-          this.___current.next(this._currentValue());
-        });
+          map(() => this._currentValue()),
+          startWith(this._currentValue()),
+        );
     }
     return this.___current;
+  }
+
+  /**
+   * This is an unfiltered stream of the value updates.
+   * It doesn't update until the value is changed.
+   * Unlike _current, it is unaffected by transactions.
+   *
+   * @returns {Subject<T> | Subject<unknown>}
+   * @private
+   */
+  get _valueStream() {
+    if (!this.__valueStream) {
+      this.__valueStream = new Subject();
+      this._valueStreamSub = this.__valueStream.subscribe((value) => {
+        this._value = value;
+      });
+    }
+    return this.__valueStream;
   }
 
   /**
@@ -159,24 +180,24 @@ class ValueStream {
    * @private
    */
   get _changes() {
-    let previous = ABSENT;
-
-    const changeMap = (value) => {
-      if (!(previous === ABSENT)) {
-        const prev = previous;
-        previous = value;
-        return { name: this.name, prev, value };
-      }
-      previous = value;
-      return { name: this.name, value };
-    };
-
     if (!this.__changes) {
       if (this.isSingleValue) {
+        let previous = this.isSingleValue ? this.value : ABSENT;
+        const changeMap = (value) => {
+          if (!(previous === ABSENT)) {
+            const prev = previous;
+            previous = value;
+            return { name: this.name, prev, value };
+          }
+          previous = value;
+          return { name: this.name, value };
+        };
+
         if (SCALAR_TYPES.includes(this.type)) {
-          this.__changes = this.__changesBase.pipe(distinct(), map(changeMap));
+          // suppress updates that do not change the value
+          this.__changes = this._valueStream.pipe(distinct(), map(changeMap));
         } else {
-          this.__changes = this.__changesBase.pipe(map(changeMap));
+          this.__changes = this._valueStream.pipe(map(changeMap));
         }
       } else {
         this.__changes = new Subject(); // it is children's job to push changes into the subject
@@ -287,19 +308,11 @@ class ValueStream {
     return this;
   }
 
-  /**
-   * This is the raw value that has changed. Changes emits a complex type with metadata about the change
-   * @returns {Subject<T> | Subject<unknown>}
-   * @private
-   */
-  get __changesBase() {
-    if (!this.___changesBase) {
-      this.___changesBase = new Subject();
-    }
-    return this.___changesBase;
-  }
-
   _update(value) {
+    if (!this.isSingleValue) {
+      this.emitError({ message: 'attempt to call _update on a multi-value', value });
+      return;
+    }
     if (this.hasType()) {
       if (!is[this.type](value)) {
         this.emitError({
@@ -309,8 +322,7 @@ class ValueStream {
         return;
       }
     }
-    this._value = value;
-    this.__changesBase.next(value);
+    this._valueStream.next(value);
   }
 
   set(alpha, beta) {
@@ -325,6 +337,9 @@ class ValueStream {
   }
 
   get(name) {
+    if (this.isSingleValue) {
+      return this.value;
+    }
     if (!this.children.has(name)) {
       console.log('attempt to get unknown child value', name);
       return undefined;
@@ -334,29 +349,29 @@ class ValueStream {
 
   /* ---------------------- Methods ------------------------ */
   /**
-   * A curried method to define an action.
+   * A curried method to define an method.
    *
-   * @param actionName {String}
+   * @param methodName {String}
    * @param fn {function}
    * @param transact {boolean}
    * @returns {this}
    */
-  method(actionName, fn, transact = false) {
-    if (!(actionName && is.string(actionName))) {
-      throw new Error('method requires a string as the first parameter');
+  method(methodName, fn, transact = false) {
+    if (!(methodName && is.string(methodName))) {
+      throw new Error('method requires a legal javaScript property name as the first parameter');
     }
-    if (!propRE.test(actionName)) {
-      throw new Error(`the action name ${actionName} is not a valid javaScript property`);
+    if (!propRE.test(methodName)) {
+      throw new Error(`the method name, "${methodName}" is not a valid javaScript property name`);
     }
     if (!is.fn(fn)) {
       throw new Error('method requires a function as the second parameter');
     }
 
-    if (this._methods.has(actionName)) {
-      console.log(this.name, 'already has an action ', actionName);
+    if (this._methods.has(methodName)) {
+      console.log(this.name, 'already has an method ', methodName);
     } else {
-      this._methods.set(actionName, this.actionFactory(actionName, fn, transact));
-      this.do[actionName] = this._methods.get(actionName);
+      this._methods.set(methodName, this.methodFactory(methodName, fn, transact));
+      this.do[methodName] = this._methods.get(methodName);
     }
 
     return this;
@@ -372,17 +387,17 @@ class ValueStream {
   }
 
   /**
-   * returns a bound function that performs the defined action
-   * @param actionName {String}
+   * returns a bound function that performs the defined method
+   * @param methodName {String}
    * @param fn {function}
    * @param transact {boolean}
    * @returns {function(...[*]=): Promise<*|{error: *}|undefined|{error: *}>|{error}|undefined|{error}|{error: *}}
    */
-  actionFactory(actionName, fn, transact = false) {
+  methodFactory(methodName, fn, transact = false) {
     return (...args) => {
       if (transact) {
-        const transaction = this.addTransaction(actionName, args);
-        const result = this.perform(actionName, fn, args);
+        const transaction = this.addTransaction(methodName, args);
+        const result = this.perform(methodName, fn, args);
 
         if (Promise.resolve(result) === result) {
           // delay the end of transaction to resolution of promise
@@ -400,29 +415,12 @@ class ValueStream {
         return result;
       }
 
-      return this.perform(actionName, fn, args);
+      return this.perform(methodName, fn, args);
     };
   }
 
-  async asyncPerform(actionName, promise, params) {
-    try {
-      const result = await (promise);
-      if (result) {
-        return this.perform(actionName, result, params);
-      }
-      return null;
-    } catch (error) {
-      this.emitError({
-        actionName,
-        error,
-        params,
-      });
-      return { error };
-    }
-  }
-
   /**
-   * Perform will attempt to actionFactory the method in the safest possible context
+   * Perform will attempt to methodFactory the method in the safest possible context
    * trapping and properly channeling all errors; if a function or promise is resolved,
    * it recurses  -- "unravels" -- it until a non-promise non-function is returned.
    *
@@ -435,16 +433,20 @@ class ValueStream {
     try {
       // noinspection JSIncompatibleTypesComparison
       if (Promise.resolve(fn) === fn) {
-        return this.asyncPerform(actionName, fn, params);
+        return fn.then((value) => this.perform(actionName, value, params))
+          .catch((error) => {
+            this.emitError({
+              error,
+              actionName,
+              params,
+            });
+            return { error };
+          });
       }
       if (is.fn(fn)) {
-        const result = fn(this, ...params);
-        if (result) {
-          return this.perform(actionName, result, params);
-        }
-        return result;
+        return this.perform(actionName, fn(this, ...params), params);
       }
-      // the return value of the action is not a function or a promise. return it as the result.
+      // the return value of the method is not a function or a promise. return it as the result.
       return fn;
     } catch (error) {
       this.emitError({
@@ -476,6 +478,24 @@ class ValueStream {
       return this._value;
     }
     return this.toObject();
+  }
+
+  get my() {
+    if ((this.isSingleValue) || (typeof Proxy === 'undefined')) {
+      return this.value;
+    }
+
+    if (!this._proxy) {
+      this._Proxy = Proxy(this, {
+        get(obj, name) {
+          return obj.get(name);
+        },
+        set(obj, name, value) {
+          return obj.set(name, value);
+        },
+      });
+    }
+    return this._proxy;
   }
 
   /* --------------------- Observable methods ----------- */
@@ -539,21 +559,39 @@ class ValueStream {
   }
 
   complete() {
-    if (this._current) {
-      this._current.complete();
-    }
-    if (this._currentSub) {
-      this._currentSub.unsubscribe();
-    }
     if (this._changes) {
       this._changes.complete();
     }
     if (this._transCount) {
       this._transCount.complete();
     }
+    if (this._valueStreamSub) {
+      this._valueStreamSub.unsubscribe();
+    }
     if (this._errors) {
       this._errors.complete();
     }
+  }
+
+  watchStream(alpha) {
+    if (this.isSingleValue) {
+      return this._changes;
+    }
+    return this._changes.pipe(filter((change) => (change.name === alpha && change.target === this.name)));
+  }
+
+  watch(alpha, beta, gamma, delta) {
+    if (this.isSingleValue) {
+      return this.watchStream().subscribe(alpha, beta, gamma);
+    }
+    return this.watchStream(alpha).subscribe(beta, gamma, delta);
+  }
+
+  watchFlat(alpha, beta, gamma, delta) {
+    if (this.isSingleValue) {
+      return this.watchStream().subscribe(({ value, prev }) => alpha(value, prev), beta, gamma);
+    }
+    return this.watchStream(alpha).subscribe(({ value, prev }) => beta(value, prev), gamma, delta);
   }
 }
 

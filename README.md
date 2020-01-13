@@ -10,7 +10,7 @@ Redux is not good. It is difficult to test, has no schema
 and is very verbose. Looking Glass Engine (or LGE) is succinct,
 allows for schema constraints, and is far more flexible and easy to use.
    
-# ValueStream primary API
+# ValueStream public API
 
 There is a fairly hefty load of code under the hood of a ValueStream; however you only
 need about five hooks to use ValueStreams, which we present here. 
@@ -18,7 +18,7 @@ need about five hooks to use ValueStreams, which we present here.
 The assumption here is that you want to create a multi value stream -- that is a stream
 with multiple values. 
 
-## constructor
+## *constructor*
 
 ```javascript
 const myStream = new ValueStream('streamName')

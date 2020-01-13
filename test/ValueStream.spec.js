@@ -442,7 +442,7 @@ tap.test(p.name, (suite) => {
         const monitor = monitorMulti(stream);
         const result = await stream.do.post();
 
-
+        console.log('result of async:', result);
         tvsAsyncError.same(result, {
           error: {
             saved: false, x: 0, y: 0, message: 'x or y must be non-zero',
@@ -484,6 +484,111 @@ tap.test(p.name, (suite) => {
       });
 
       tvsMethods.end();
+    });
+
+    testValueStream.test('watch', (w) => {
+      w.test('single value', (wsv) => {
+        const makeSingleValueStream = () => {
+          const stream = new ValueStream('count', 0, 'number')
+            .method('incDouble', (stream) => {
+              stream.do.inc();
+              stream.do.double();
+            }, true)
+            .method('inc', (stream) => {
+              stream.set(stream.value + 1);
+            })
+            .method('double', (stream) => {
+              stream.set(stream.value * 2);
+            });
+
+          return stream;
+        };
+
+        wsv.test('on set', (wsvOnSet) => {
+          const stream = makeSingleValueStream();
+          const changes = [];
+
+          stream.watch((data) => changes.push(data));
+
+          wsvOnSet.same(changes, [], 'starts without changes');
+
+          stream.set(3);
+
+          wsvOnSet.same(changes, [{ name: 'count', prev: 0, value: 3 }]);
+          stream.complete();
+          wsvOnSet.end();
+        });
+
+        wsv.test('on method', (wsvOnMethod) => {
+          const stream = makeSingleValueStream();
+          const changes = [];
+
+          stream.watch((data) => changes.push(data));
+
+          stream.do.inc();
+
+          wsvOnMethod.same(changes, [{ name: 'count', prev: 0, value: 1 }]);
+          stream.complete();
+          wsvOnMethod.end();
+        });
+
+        wsv.test('on method, transactional', (wsvOnMethod) => {
+          const stream = makeSingleValueStream();
+          const changes = [];
+
+          stream.watch((data) => changes.push(data));
+
+          stream.do.incDouble();
+
+          wsvOnMethod.same(changes, [
+            { name: 'count', prev: 0, value: 1 },
+            { name: 'count', prev: 1, value: 2 },
+          ]);
+          wsvOnMethod.end();
+        });
+
+        wsv.end();
+      });
+
+      w.test('multi value', (wmv) => {
+        const stream = coordFactory();
+
+        const changes = [];
+
+        stream.watch('x', (change) => changes.push(change));
+
+        wmv.same(changes, [], 'starts empty');
+
+        stream.do.setY(2);
+
+        wmv.same(changes, [], 'ignores other properties');
+
+        stream.do.add(2, 2);
+
+        wmv.same(changes, [{
+          name: 'x', value: 2, source: 'x', prev: 0, target: 'coord',
+        }], 'notices x change');
+
+        stream.set('x', 3);
+        wmv.same(changes, [{
+          name: 'x', value: 2, source: 'x', prev: 0, target: 'coord',
+        },
+        {
+          name: 'x', value: 3, source: 'x', prev: 2, target: 'coord',
+        }], 'notices x change from set');
+
+        stream.set('x', 3);
+        wmv.same(changes, [{
+          name: 'x', value: 2, source: 'x', prev: 0, target: 'coord',
+        },
+        {
+          name: 'x', value: 3, source: 'x', prev: 2, target: 'coord',
+        }], 'ignores non-change');
+
+        stream.complete();
+        wmv.end();
+      });
+      w.end();
     });
 
     testValueStream.end();
