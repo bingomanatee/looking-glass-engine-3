@@ -1,6 +1,6 @@
 {
   "name": "@wonderlandlabs/looking-glass-engine",
-  "version": "3.1.1",
+  "version": "3.1.2",
   "description": "A state system for React and more",
   "main": "lib/index.js",
   "module": "es/index.js",
@@ -21,13 +21,13 @@
     "rxjs": "^6.5.4"
   },
   "devDependencies": {
-    "eslint": "^6.3.0",
     "babel-eslint": "^10.0.3",
+    "eslint": "^6.3.0",
     "eslint-config-airbnb": "^18.0.1",
-    "eslint-plugin-react-hooks": "^2.1.1",
     "eslint-plugin-import": "^2.18.2",
     "eslint-plugin-jsx-a11y": "^6.2.3",
     "eslint-plugin-react": "^7.14.3",
+    "eslint-plugin-react-hooks": "^2.1.1",
     "rollup": "^1.22.0",
     "rollup-plugin-commonjs": "^10.1.0",
     "rollup-plugin-node-resolve": "^5.2.0",
