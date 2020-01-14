@@ -500,6 +500,18 @@ class ValueStream {
 
   /* --------------------- Observable methods ----------- */
 
+
+  // combines the subject stream and the error stream into a single stream
+  get valueErrorStream() {
+    if (!this._valueErrorStream) {
+      this._valueErrorStream = merge(
+        this._current.pipe(map(() => ({ type: 'value', message: this }))),
+        this._errors.pipe(map((error) => ({ type: 'error', message: error }))),
+      );
+    }
+    return this._valueErrorStream;
+  }
+
   /**
    * Note - this
    * @param onNext {function}
@@ -518,14 +530,7 @@ class ValueStream {
       throw new Error('subscribe onNext must be a function');
     }
 
-    // combines the subject stream and the error stream into a single stream
-
-    const sub = merge(
-      this._current.pipe(map(() => ({ type: 'value', message: this }))),
-      this._errors.pipe(map((error) => ({ type: 'error', message: error }))),
-    );
-
-    return sub.subscribe(({ type, message }) => {
+    return this.valueErrorStream.subscribe(({ type, message }) => {
       switch (type) {
         case 'error':
           if (onError) {
@@ -535,7 +540,7 @@ class ValueStream {
 
         case 'value':
           if (onNext) {
-            onNext(message);
+            onNext(this);
           }
           break;
 

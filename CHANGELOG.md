@@ -1,4 +1,9 @@
+## 3.1.0
+
+completely rebuilt. (again). 
+a reduction of the 3.0 alpha code to eliminate eventEmitter;
+now change is a formal stream throughout ValueStream and is directly watch-able. 
+
 ## 3.1.1
 
-a reduction of the 3.0 alpha code to eliminate eventEmitter; now change is a formal
-stream throughout ValueStream and is directly watch-able. 
+made mergedStream more efficient; added my proxy
