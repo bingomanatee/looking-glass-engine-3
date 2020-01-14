@@ -486,6 +486,88 @@ tap.test(p.name, (suite) => {
       tvsMethods.end();
     });
 
+    testValueStream.test('properties', (tvsProps) => {
+      tvsProps.test('my', (my) => {
+        const coord = coordFactory();
+
+        my.same(coord.my.x, 0, 'x starts as 0');
+        my.same(coord.my.y, 0, 'y starts as 0');
+
+        coord.do.add(2, 3);
+
+        my.same(coord.my.x, 2, 'x goes to 2');
+        my.same(coord.my.y, 3, 'y goes to 3');
+
+        my.end();
+      });
+
+      tvsProps.test('type', (type) => {
+        const stream = new ValueStream('typer')
+          .property('a', 1) // no type
+          .property('b', 2, 'integer') // is type
+          .property('c', 'three', 'string') // /is type
+          .property('d', 1, (value, name) => {
+            if (!is.number(value)) {
+              return `${name} must be a number`;
+            }
+            if (value < 0) {
+              return `${name} must be >= 0`;
+            }
+            if (value > 4) {
+              return `${name} must be <= 4`;
+            }
+            return false;
+          }); // test
+
+
+        type.same(stream.my.a, 1);
+        type.same(stream.my.b, 2);
+        type.same(stream.my.c, 'three');
+        type.same(stream.my.d, 1);
+
+        const result = monitorMulti(stream);
+
+        stream.do.setA(10);
+        stream.do.setB(10);
+        stream.do.setC(10);
+        stream.do.setC('four');
+        stream.do.setD(10);
+        stream.do.setD(3);
+
+        console.log('errors: ', JSON.stringify(result.errors));
+
+        type.same(result.errors, [{
+          error: {
+            error: { message: 'wrong type', value: 10 },
+            id: 'typer.c',
+            name: 'c',
+            source: 'c',
+            target: 'typer',
+          },
+          id: 'typer',
+          name: 'typer',
+        }, {
+          error: {
+            error: { error: 'd must be <= 4', value: 10 },
+            id: 'typer.d',
+            name: 'd',
+            source: 'd',
+            target: 'typer',
+          },
+          id: 'typer',
+          name: 'typer',
+        }],
+        'some properties throw errors');
+
+        type.same(stream.my.a, 10);
+        type.same(stream.my.b, 10);
+        type.same(stream.my.c, 'four');
+        type.same(stream.my.d, 3);
+        type.end();
+      });
+      tvsProps.end();
+    });
+
     testValueStream.test('watch', (w) => {
       w.test('single value', (wsv) => {
         const makeSingleValueStream = () => {

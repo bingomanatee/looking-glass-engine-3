@@ -65,10 +65,11 @@ class ValueStream {
 
     if (this.isSingleValue) {
       if (type && (!(type === ABSENT))) {
-        if (!is.string(type)) {
-          throw new Error(`bad type value for ${name}: ${type}`);
+        if (is.string(type)) {
+          this._type = type;
+        } else if (is.fn(type)) {
+          this._test = type;
         }
-        this._type = type;
       }
     }
   }
@@ -107,6 +108,14 @@ class ValueStream {
 
   get type() {
     return this._type || ABSENT;
+  }
+
+  get test() {
+    return this._test || ABSENT;
+  }
+
+  hasTest() {
+    return this.test && (this.test !== ABSENT) && (typeof this.test === 'function');
   }
 
   hasType() {
@@ -322,6 +331,17 @@ class ValueStream {
         return;
       }
     }
+
+    if (this.hasTest()) {
+      const error = this.test(value, this.name, is, this);
+      if (error) {
+        this.emitError({
+          error,
+          value,
+        });
+        return;
+      }
+    }
     this._valueStream.next(value);
   }
 
@@ -486,7 +506,7 @@ class ValueStream {
     }
 
     if (!this._proxy) {
-      this._Proxy = Proxy(this, {
+      this._proxy = new Proxy(this, {
         get(obj, name) {
           return obj.get(name);
         },

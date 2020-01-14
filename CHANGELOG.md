@@ -7,3 +7,7 @@ now change is a formal stream throughout ValueStream and is directly watch-able.
 ## 3.1.1
 
 made mergedStream more efficient; added my proxy
+
+## 3.1.3
+
+allowed user-submitted functions (tests) for properties
