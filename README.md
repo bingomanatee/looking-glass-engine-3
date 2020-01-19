@@ -183,3 +183,14 @@ called when a ValueStream is `complete()`d. It has no parameters.
 
 stops the ValueStream, preventing further data from being emitted. 
 
+## Events
+
+ValueStream is an event emitter as well. This is largely identical to 
+the node eventEmitter pattern, but for economy of dependencies its 
+implemented with streams.
+
+Events are not data and don't have any direct coupling to the values 
+ValueStream monitors. They exist to allow open/indirect coupling of methods
+to situations; for instance, emitting a "sizeChange" event when
+width or height change or emitting a derived value like the sum of 
+an array property when its contents change.  

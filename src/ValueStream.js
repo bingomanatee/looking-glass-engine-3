@@ -10,6 +10,7 @@ import is from 'is';
 import _ from 'lodash';
 import capFirst from './capFirst';
 import Transaction from './Transaction';
+import typeTestFor from './typeTestFor';
 
 const ABSENT = Symbol('ABSENT');
 const has = (v) => v && (v !== ABSENT);
@@ -74,6 +75,72 @@ class ValueStream {
     }
   }
 
+  emit(message, ...args) {
+    return this._getEmitter(message).next(args);
+  }
+
+  get _emitterListeners() {
+    if (!this.__emitterListeners) {
+      this.__emitterListeners = new Map();
+    }
+    return this.__emitterListeners;
+  }
+
+  on(message, listener) {
+    if (!this._emitterListeners.has(message)) {
+      this._emitterListeners.set(message, new Set());
+    }
+    this._emitterListeners.get(message).add(listener);
+  }
+
+  off(message, listener) {
+    if ((!listener) || (!is.fn(listener) || is.string(listener))) {
+      console.log('off requires a function; if you want to remove all listeners, use "offAll"');
+      return;
+    }
+    if (this._emitterListeners.has(message)) {
+      this._emitterListeners(message).delete(listener);
+    }
+  }
+
+  offAll(message) {
+    if (!(message && is.string(message))) {
+      console.log('emitter request must be a nonempty string');
+      return;
+    }
+    this._emitterListeners.delete(message);
+  }
+
+  _getEmitter(name) {
+    if (!(name && is.string(name))) {
+      throw new Error('emitter request must be a nonempty string');
+    }
+
+    if (!this._emitters) {
+      this._emitters = new Map();
+    }
+
+    if (!this._emitters.has(name)) {
+      const subject = new Subject();
+      this._emitters.set(name, subject);
+      subject._sub = subject.subscribe((args) => {
+        if (this._emitterListeners.has(name)) {
+          this._emitterListeners.get(name)
+            .forEach((listener) => {
+              if (is.string(listener) && this.do[listener]) {
+                this.do(listener, ...args);
+              }
+              if (is.fn(listener)) {
+                listener(this, ...args);
+              }
+            });
+        }
+      });
+    }
+
+    return this._emitters.get(name);
+  }
+
   closeTransaction(trans) {
     if (this._trans) {
       this._trans.delete(trans);
@@ -96,7 +163,6 @@ class ValueStream {
 
     return trans;
   }
-
 
   get _methods() {
     if (!this.___methods) {
@@ -247,11 +313,10 @@ class ValueStream {
       return;
     }
     const value = this._value;
-    const { type } = this;
     this._value = ABSENT;
 
     if (name) {
-      this.property(name, value, type);
+      this.property(name, value, this.type);
     }
     // else the value is extinguished
   }
@@ -315,6 +380,55 @@ class ValueStream {
     });
 
     return this;
+  }
+
+  /**
+   * a special case - creates a number limited to a numeric ragne.
+   * @param name {String}
+   * @param value {}
+   * @param params {object}
+   */
+  propertyRange(name, value, params = {}) {
+    const type = _.get(params, 'type', 'number');
+    const min = _.get(params, 'min', Number.NEGATIVE_INFINITY);
+    const max = _.get(params, 'max', Number.POSITIVE_INFINITY);
+
+    if (is.number(value)) {
+      if (is.number(min)) {
+        value = Math.max(min, value);
+      }
+
+      if (is.number(max)) {
+        value = Math.min(max, value);
+      }
+    }
+
+    const typeTest = typeTestFor(type, name);
+
+    const test = (value, nameStr) => {
+      const error = typeTest(value);
+      if (error) {
+        console.log('propertyRange - returning ', error);
+        return error;
+      }
+      if (min !== Number.NEGATIVE_INFINITY) {
+        if (!is.ge(value, min)) {
+          return `${nameStr} must be >= ${min}`;
+        }
+      }
+      if (max !== Number.POSITIVE_INFINITY) {
+        if (!is.le(value, max)) {
+          return `${nameStr} must be <= ${max}`;
+        }
+      }
+      return false;
+    };
+
+    return this.property(name, value, test);
+  }
+
+  getStream(name) {
+    return (!this.isSingleValue) && this._children.has(name) && this._children(name);
   }
 
   _update(value) {
@@ -584,6 +698,9 @@ class ValueStream {
   }
 
   complete() {
+    if (this._emitters) {
+      this._emitters.forEach((sub) => sub.complete());
+    }
     if (this._changes) {
       this._changes.complete();
     }
@@ -605,18 +722,32 @@ class ValueStream {
     return this._changes.pipe(filter((change) => (change.name === alpha && change.target === this.name)));
   }
 
+  /**
+   * given an array of strings and functions,
+   * replaces the strings into method calls
+   * @param methods
+   * @returns {[function]}
+   * @private
+   */
+  _interpret(method) {
+    if (is.string(method)) {
+      return (...args) => this.do[method](...args);
+    }
+    return method;
+  }
+
   watch(alpha, beta, gamma, delta) {
     if (this.isSingleValue) {
-      return this.watchStream().subscribe(alpha, beta, gamma);
+      return this.watchStream().subscribe(this._interpret(alpha));
     }
-    return this.watchStream(alpha).subscribe(beta, gamma, delta);
+    return this.watchStream(alpha).subscribe(this._interpret(beta), gamma, delta);
   }
 
   watchFlat(alpha, beta, gamma, delta) {
     if (this.isSingleValue) {
-      return this.watchStream().subscribe(({ value, prev }) => alpha(value, prev), beta, gamma);
+      return this.watchStream().subscribe(({ value, prev }) => this._interpret(alpha)(value, prev), beta, gamma);
     }
-    return this.watchStream(alpha).subscribe(({ value, prev }) => beta(value, prev), gamma, delta);
+    return this.watchStream(alpha).subscribe(({ value, prev }) => this._interpret(beta)(value, prev), gamma, delta);
   }
 }
 

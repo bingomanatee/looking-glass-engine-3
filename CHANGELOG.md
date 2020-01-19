@@ -11,3 +11,12 @@ made mergedStream more efficient; added my proxy
 ## 3.1.3
 
 allowed user-submitted functions (tests) for properties
+
+## 3.1.4
+
+added numeric range helper
+
+## 3.1.5
+
+added events. Events can redirect to methods.
+Allowing watching to be redirected towards a method. 

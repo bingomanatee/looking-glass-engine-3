@@ -441,8 +441,6 @@ tap.test(p.name, (suite) => {
         const stream = coordFactory();
         const monitor = monitorMulti(stream);
         const result = await stream.do.post();
-
-        console.log('result of async:', result);
         tvsAsyncError.same(result, {
           error: {
             saved: false, x: 0, y: 0, message: 'x or y must be non-zero',
@@ -499,6 +497,128 @@ tap.test(p.name, (suite) => {
         my.same(coord.my.y, 3, 'y goes to 3');
 
         my.end();
+      });
+
+      tvsProps.test('range', (range) => {
+        range.test('basic', (rangeBasic) => {
+          const clamp = new ValueStream('rangeBasic')
+            .propertyRange('digit', 0, {
+              min: 0,
+              max: 9,
+              type: 'integer',
+            });
+
+          const result = monitorMulti(clamp);
+
+          clamp.do.setDigit(2);
+          clamp.do.setDigit(3.5);
+          clamp.do.setDigit(20);
+          clamp.do.setDigit(-20);
+          clamp.do.setDigit(8);
+
+          rangeBasic.same(result.errors, [{
+            error: {
+              error: { error: 'digit must be a integer', value: 3.5 },
+              id: 'rangeBasic.digit',
+              name: 'digit',
+              source: 'digit',
+              target: 'rangeBasic',
+            },
+            id: 'rangeBasic',
+            name: 'rangeBasic',
+          }, {
+            error: {
+              error: { error: 'digit must be <= 9', value: 20 },
+              id: 'rangeBasic.digit',
+              name: 'digit',
+              source: 'digit',
+              target: 'rangeBasic',
+            },
+            id: 'rangeBasic',
+            name: 'rangeBasic',
+          }, {
+            error: {
+              error: { error: 'digit must be >= 0', value: -20 },
+              id: 'rangeBasic.digit',
+              name: 'digit',
+              source: 'digit',
+              target: 'rangeBasic',
+            },
+            id: 'rangeBasic',
+            name: 'rangeBasic',
+          }]);
+
+          rangeBasic.same(clamp.my.digit, 8, 'digit set to right value');
+          result.sub.unsubscribe();
+
+          rangeBasic.end();
+        });
+
+        range.test('basic', (maxOnly) => {
+          const clamp = new ValueStream('maxOnly')
+            .propertyRange('digit', 0, {
+              max: 9,
+            });
+
+          const result = monitorMulti(clamp);
+
+          clamp.do.setDigit(2);
+          clamp.do.setDigit(3.5);
+          clamp.do.setDigit(20);
+          clamp.do.setDigit(9);
+          clamp.do.setDigit(-20);
+          clamp.do.setDigit(8);
+
+          maxOnly.same(result.errors, [{
+            error: {
+              error: { error: 'digit must be <= 9', value: 20 },
+              id: 'maxOnly.digit',
+              name: 'digit',
+              source: 'digit',
+              target: 'maxOnly',
+            },
+            id: 'maxOnly',
+            name: 'maxOnly',
+          }]);
+
+          maxOnly.same(clamp.my.digit, 8, 'digit set to right value');
+          result.sub.unsubscribe();
+
+          maxOnly.end();
+        });
+
+        range.test('min only', (minOnly) => {
+          const clamp = new ValueStream('minOnly')
+            .propertyRange('digit', 0, {
+              min: 0,
+            });
+
+          const result = monitorMulti(clamp);
+
+          clamp.do.setDigit(2);
+          clamp.do.setDigit(3.5);
+          clamp.do.setDigit(20);
+          clamp.do.setDigit(-20);
+          clamp.do.setDigit(8);
+
+          minOnly.same(result.errors, [{
+            error: {
+              error: { error: 'digit must be >= 0', value: -20 },
+              id: 'minOnly.digit',
+              name: 'digit',
+              source: 'digit',
+              target: 'minOnly',
+            },
+            id: 'minOnly',
+            name: 'minOnly',
+          }]);
+
+          minOnly.same(clamp.my.digit, 8, 'digit set to right value');
+          result.sub.unsubscribe();
+
+          minOnly.end();
+        });
+        range.end();
       });
 
       tvsProps.test('type', (type) => {
@@ -563,6 +683,8 @@ tap.test(p.name, (suite) => {
         type.same(stream.my.b, 10);
         type.same(stream.my.c, 'four');
         type.same(stream.my.d, 3);
+        result.sub.unsubscribe();
+        stream.complete();
         type.end();
       });
       tvsProps.end();
@@ -670,7 +792,66 @@ tap.test(p.name, (suite) => {
         stream.complete();
         wmv.end();
       });
+
+      w.test('string listener', (wsv) => {
+        const stream = coordFactory();
+
+        stream.property('xHistory', [], 'array')
+          .method('updateXHistory', (s, { value }) => {
+            s.do.setXHistory([...s.my.xHistory, value]);
+          });
+
+        stream.watch('x', 'updateXHistory');
+
+        wsv.same(stream.my.xHistory, []);
+
+        stream.do.add(2, 4);
+        wsv.same(stream.my.xHistory, [2]);
+
+        stream.do.add(3, 5);
+        wsv.same(stream.my.xHistory, [2, 5]);
+
+        stream.do.setX(20);
+        wsv.same(stream.my.xHistory, [2, 5, 20]);
+
+        wsv.end();
+      });
       w.end();
+    });
+
+    testValueStream.test('emit', (em) => {
+      const stream = new ValueStream('counter')
+        .property('count', 0, 'integer')
+        .method('inc', (s) => s.do.setCount(s.my.count + 1));
+
+      stream.watchFlat('count', (value) => {
+        if (is.odd(value)) {
+          stream.emit('odd', value);
+        } else {
+          stream.emit('even', value);
+        }
+      });
+
+      const evens = [];
+      const odds = [];
+
+      stream.on('even', (s, value) => {
+        evens.push(value);
+      });
+      stream.on('odd', (s, value) => {
+        odds.push(value);
+      });
+
+      em.same(evens, [], 'evens starts empty');
+      em.same(odds, [], 'odds starts empty');
+
+      stream.do.inc();
+      stream.do.inc();
+
+      em.same(evens, [2]);
+      em.same(odds, [1]);
+
+      em.end();
     });
 
     testValueStream.end();
