@@ -7,7 +7,7 @@ import {
   map, distinct, filter, startWith,
 } from 'rxjs/operators';
 import is from 'is';
-import _ from 'lodash';
+import lodashGet from 'lodash.get';
 import capFirst from './capFirst';
 import Transaction from './Transaction';
 import typeTestFor from './typeTestFor';
@@ -389,9 +389,9 @@ class ValueStream {
    * @param params {object}
    */
   propertyRange(name, value, params = {}) {
-    const type = _.get(params, 'type', 'number');
-    const min = _.get(params, 'min', Number.NEGATIVE_INFINITY);
-    const max = _.get(params, 'max', Number.POSITIVE_INFINITY);
+    const type = lodashGet(params, 'type', 'number');
+    const min = lodashGet(params, 'min', Number.NEGATIVE_INFINITY);
+    const max = lodashGet(params, 'max', Number.POSITIVE_INFINITY);
 
     if (is.number(value)) {
       if (is.number(min)) {
