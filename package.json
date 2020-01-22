@@ -1,6 +1,6 @@
 {
   "name": "@wonderlandlabs/looking-glass-engine",
-  "version": "3.1.6",
+  "version": "3.1.7",
   "description": "A state system for React and more",
   "main": "lib/index.js",
   "module": "es/index.js",
@@ -21,9 +21,6 @@
     "lodash.isequal": "^4.5.0",
     "rxjs": "^6.5.4"
   },
-  "peerDependencies": {
-    "react": "latest"
-  },
   "devDependencies": {
     "babel-eslint": "^10.0.3",
     "eslint": "^6.3.0",
@@ -39,7 +36,7 @@
     "tap": "^14.6.1"
   },
   "author": "David Edelhart",
-  "homepage": "https://looking-glass-engine.firebaseapp.com/",
+  "homepage": "https://looking-glass-engine.now.sh//",
   "license": "MIT",
   "repository": "https://github.com/bingomanatee/looking-glass-engine"
 }
