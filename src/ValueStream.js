@@ -76,7 +76,8 @@ class ValueStream {
   }
 
   emit(message, ...args) {
-    return this._getEmitter(message).next(args);
+    this._getEmitter(message).next(args);
+    return this;
   }
 
   get _emitterListeners() {
@@ -91,16 +92,18 @@ class ValueStream {
       this._emitterListeners.set(message, new Set());
     }
     this._emitterListeners.get(message).add(listener);
+    return this;
   }
 
   off(message, listener) {
     if ((!listener) || (!is.fn(listener) || is.string(listener))) {
       console.log('off requires a function; if you want to remove all listeners, use "offAll"');
-      return;
+      return this;
     }
     if (this._emitterListeners.has(message)) {
       this._emitterListeners(message).delete(listener);
     }
+    return this;
   }
 
   offAll(message) {
@@ -281,6 +284,29 @@ class ValueStream {
     return this.__changes;
   }
 
+  /**
+   * manually trigger a change notification.
+   * This is useful if you change a property/element of a Map,
+   * array, or object; instead of clumsily cloning or re-injecting
+   * a complex value, you can trigger a change notification manually.
+   *
+   * @param property
+   */
+  broadcast(property) {
+    if (property) {
+      const value = this.get(property);
+      this._changes.next({
+        name: property,
+        value,
+        broadcast: true,
+        target: this.name,
+      });
+    } else {
+      this._changes.next({});
+    }
+    return this;
+  }
+
   countOfTransactions() {
     if (!this._trans) {
       return 0;
@@ -380,6 +406,10 @@ class ValueStream {
     });
 
     return this;
+  }
+
+  hasProperty(name) {
+    return this.children.has(name);
   }
 
   /**
@@ -634,7 +664,6 @@ class ValueStream {
 
   /* --------------------- Observable methods ----------- */
 
-
   // combines the subject stream and the error stream into a single stream
   get valueErrorStream() {
     if (!this._valueErrorStream) {
@@ -644,6 +673,52 @@ class ValueStream {
       );
     }
     return this._valueErrorStream;
+  }
+
+  /**
+   * return a subset clone of this stream
+   * that has a subset of properties; useful for creating a shapshot that only updates
+   * when a given property changes.
+   * @param properties
+   * @returns {ValueStream}
+   */
+
+  filtered(...properties) {
+    let flatProps = [];
+    properties.forEach((p) => {
+      if (!p) {
+        return;
+      }
+      if (is.string(p)) {
+        flatProps.push(p);
+      }
+      if (Array.isArray(p)) {
+        flatProps = [...flatProps, ...p];
+      }
+    });
+
+    const validProps = flatProps.filter((p) => (p && is.string(p) && this.hasProperty(p)));
+    if (!validProps) {
+      throw new Error(`${this.name} has no properties in ${properties.join(',')}`);
+    }
+    const filtered = new ValueStream(`${this.name}_filtered_${validProps.join('_')}`);
+
+    const cloneTrans = this._transCount.subscribe((count) => {
+      try {
+        filtered._transCount.next(count);
+      } catch (err) {
+        console.log('transCount error: ', err);
+      }
+    },
+    () => {
+    },
+    () => cloneTrans.unsubscribe());
+
+    validProps.forEach((p) => {
+      filtered.property(p, this.children.get(p));
+    });
+
+    return filtered;
   }
 
   /**
@@ -738,16 +813,20 @@ class ValueStream {
 
   watch(alpha, beta, gamma, delta) {
     if (this.isSingleValue) {
-      return this.watchStream().subscribe(this._interpret(alpha));
+      this.watchStream().subscribe(this._interpret(alpha));
+    } else {
+      this.watchStream(alpha).subscribe(this._interpret(beta), gamma, delta);
     }
-    return this.watchStream(alpha).subscribe(this._interpret(beta), gamma, delta);
+    return this;
   }
 
   watchFlat(alpha, beta, gamma, delta) {
     if (this.isSingleValue) {
-      return this.watchStream().subscribe(({ value, prev }) => this._interpret(alpha)(value, prev), beta, gamma);
+      this.watchStream().subscribe(({ value, prev }) => this._interpret(alpha)(this, value, prev, this.name), beta, gamma);
+    } else {
+      this.watchStream(alpha).subscribe(({ value, prev }) => this._interpret(beta)(this, value, prev, alpha), gamma, delta);
     }
-    return this.watchStream(alpha).subscribe(({ value, prev }) => this._interpret(beta)(value, prev), gamma, delta);
+    return this;
   }
 }
 

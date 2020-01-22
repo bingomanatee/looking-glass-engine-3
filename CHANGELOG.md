@@ -20,3 +20,8 @@ added numeric range helper
 
 added events. Events can redirect to methods.
 Allowing watching to be redirected towards a method. 
+
+# 3.1.6
+
+added hasProperty(str), shortcut to this.children.has(str);
+added filtered(prop...prop) 

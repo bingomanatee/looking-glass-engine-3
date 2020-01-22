@@ -2,6 +2,7 @@
 const tap = require('tap');
 const is = require('is');
 const util = require('util');
+const _ = require('lodash');
 const p = require('./../package.json');
 
 const { ValueStream } = require('./../lib/index');
@@ -10,7 +11,7 @@ function monitorSingle(observable) {
   const result = { errors: [], values: [], done: false };
 
   result.sub = observable.subscribe((v) => {
-    result.values.push(v.value);
+    result.values.push(_.cloneDeep(v.value));
   }, (e) => {
     console.log('error keys: ', ...Array.from(Object.keys(e)));
     result.errors.push(e);
@@ -25,7 +26,7 @@ function monitorMulti(observable) {
   const result = { errors: [], values: [], done: false };
 
   result.sub = observable.subscribe((s) => {
-    result.values.push(s.value);
+    result.values.push(_.cloneDeep(s.value));
   },
   (e) => {
     result.errors.push(e);
@@ -654,7 +655,7 @@ tap.test(p.name, (suite) => {
         stream.do.setD(10);
         stream.do.setD(3);
 
-        console.log('errors: ', JSON.stringify(result.errors));
+        // console.log('errors: ', JSON.stringify(result.errors));
 
         type.same(result.errors, [{
           error: {
@@ -824,11 +825,11 @@ tap.test(p.name, (suite) => {
         .property('count', 0, 'integer')
         .method('inc', (s) => s.do.setCount(s.my.count + 1));
 
-      stream.watchFlat('count', (value) => {
+      stream.watchFlat('count', (s, value) => {
         if (is.odd(value)) {
-          stream.emit('odd', value);
+          s.emit('odd', value);
         } else {
-          stream.emit('even', value);
+          s.emit('even', value);
         }
       });
 
@@ -852,6 +853,192 @@ tap.test(p.name, (suite) => {
       em.same(odds, [1]);
 
       em.end();
+    });
+
+    testValueStream.test('doc sample', (ds) => {
+      const segment = new ValueStream('segment')
+        .property('x1', 0, 'number')
+        .property('y1', 0, 'number')
+        .property('x2', 0, 'number')
+        .property('y2', 0, 'number')
+        .property('distance', 0, 'number')
+        .method('setP1', (s, x, y) => {
+          s.do.setX1(x);
+          s.do.setY1(y);
+        }, true)
+        .method('setP2', (s, x, y) => {
+          s.do.setX2(x);
+          s.do.setY2(y);
+        }, true)
+        .method('calcDistance', (s) => {
+          const xdSquared = (s.my.x1 - s.my.x2) ** 2;
+          const ydSquared = (s.my.y1 - s.my.y2) ** 2;
+          /*
+          console.log('p1: ', s.my.x1, s.my.y1);
+          console.log('p2: ', s.my.x2, s.my.y2);
+          console.log('========== xSquared:', xdSquared, 'ySquared: ', ydSquared);
+           */
+          s.do.setDistance(Math.sqrt(xdSquared + ydSquared));
+        })
+        .watchFlat('x1', (s) => {
+          s.emit('pointsChanged');
+        })
+        .watchFlat('y1', (s) => {
+          s.emit('pointsChanged');
+        })
+        .watchFlat('x2', (s) => {
+          s.emit('pointsChanged');
+        })
+        .watchFlat('y2', (s) => {
+          s.emit('pointsChanged');
+        })
+        .on('pointsChanged', (...args) => {
+          const [ss] = args;
+          ss.do.calcDistance();
+        });
+
+      segment.subscribe((s) => {
+        console.log('distance is now:', s.my.distance);
+      });
+
+      ds.same(segment.my.distance, 0, 'first dist is zero');
+
+      segment.do.setP1(2, 4);
+      segment.do.setP2(10, 10);
+
+      ds.same(segment.my.distance, 10, 'wait triggers distance re-calc');
+
+      ds.end();
+    });
+
+    testValueStream.test('broadcast', (bc) => {
+      const arrayStream = new ValueStream('arrayStream')
+        .property('list', [])
+        .method('push', (s, v) => {
+          s.my.list.push(v);
+        })
+        .method('pushBroadcast', (s, v) => {
+          s.do.push(v);
+          s.broadcast('list');
+        });
+
+      const changes = monitorMulti(arrayStream);
+      arrayStream.subscribe(({ value }) => {
+        console.log('array stream changes', JSON.stringify(value));
+      });
+
+      arrayStream.do.push(1);
+      arrayStream.do.push(2);
+      arrayStream.do.push(3);
+      arrayStream.do.pushBroadcast(4);
+      arrayStream.do.push(5);
+
+      console.log('changes:', JSON.stringify(changes.values));
+
+      bc.same(changes.values, [
+        { list: [] },
+        { list: [1, 2, 3, 4] },
+      ]);
+      bc.end();
+    });
+
+    testValueStream.test('filter', (tf) => {
+      const baseStream = new ValueStream('abcd')
+        .property('a', 1)
+        .property('b', 2)
+        .property('c', 3)
+        .property('d', 4)
+        .method('addAll', (s, n) => {
+          s.do.setA(s.my.a + n);
+          s.do.setB(s.my.b + n);
+          s.do.setC(s.my.c + n);
+          s.do.setD(s.my.d + n);
+        }, true);
+
+      const filteredStream = baseStream.filtered('a', 'd');
+      // filteredStream.subscribe(({ value }) => console.log('filtered update:', value));
+
+      const baseObs = monitorMulti(baseStream);
+
+      const filteredObs = monitorMulti(filteredStream);
+
+      tf.same(baseObs.values, [{
+        a: 1, b: 2, c: 3, d: 4,
+      },
+      ], 'initial values base');
+      tf.same(filteredObs.values, [{
+        a: 1, d: 4,
+      }], 'initial values filtered');
+
+      // set an unfilterd value
+      baseStream.do.setB(5);
+
+      tf.same(baseObs.values, [{
+        a: 1, b: 2, c: 3, d: 4,
+      },
+      {
+        a: 1, b: 5, c: 3, d: 4,
+      }], 'unmonitored change');
+      // note -filtered obs should not change
+      tf.same(filteredObs.values, [{
+        a: 1, d: 4,
+      }], 'unmonitored value changes nothing on filter');
+
+      // set a filtered value
+
+      baseStream.do.setA(10);
+
+      tf.same(baseObs.values, [{
+        a: 1, b: 2, c: 3, d: 4,
+      },
+      {
+        a: 1, b: 5, c: 3, d: 4,
+      },
+      {
+        a: 10, b: 5, c: 3, d: 4,
+      },
+      ], 'monitored value change');
+      // note -filtered obs should not change
+      tf.same(filteredObs.values, [
+        {
+          a: 1, d: 4,
+        },
+        {
+          a: 10, d: 4,
+        },
+      ], 'monitored value triggers change');
+
+      // testing watching a transcription locked action
+
+      baseStream.do.addAll(5);
+
+      tf.same(baseObs.values, [{
+        a: 1, b: 2, c: 3, d: 4,
+      },
+      {
+        a: 1, b: 5, c: 3, d: 4,
+      },
+      {
+        a: 10, b: 5, c: 3, d: 4,
+      },
+      {
+        a: 15, b: 10, c: 8, d: 9,
+      },
+      ], 'base method triggeres transactional update');
+      // note -filtered obs should not change
+      tf.same(filteredObs.values, [
+        {
+          a: 1, d: 4,
+        },
+        {
+          a: 10, d: 4,
+        },
+        {
+          a: 15, d: 9,
+        },
+      ], 'transactional method triggers single update on filter');
+
+      tf.end();
     });
 
     testValueStream.end();

@@ -231,8 +231,8 @@ class ColorPicker extends Component {
 
 ```
 
-*Note - its a fairly easy task to use streams with hooks. So easy that I'm not going to 
-patronise you by showing you how to do it.*
+*Note - its a fairly easy task to use streams with hooks. 
+So easy that I'm not going to patronise you by showing you how to do it.*
 
 ## constructor
 
@@ -242,10 +242,38 @@ by calling `new ValueStream('count', 0, 'number')`.
 You can't add properties to a single-value stream,
 but you can add methods. 
 
-### method `property(name, value, type?)` : stream
+## ValueStream methods
+
+### method: `property(name, value, type?)` : stream
 
 Fun fact: properties in fact define single-value 
 streams that are stored in a map of the parent value stream.
+
+you can in fact pass a valueStream as the sole property, or the value,
+to this method to create a deeply nested property series; this has 
+not been deeply tested but it is possible in theory. 
+
+### method: `propertyRange(name, value, params = { min: number = Number.NEGATIVE_INFINITY, max: number = Number.POSITIVE_INFINITY, type: string = 'number'}):ValueStream
+
+creates a property (like the method above) that is a numeric value that is clamped between
+the minimum and maximum range of the third argument. you don't have to define **BOTH**
+`min` and `max`; though if you don't define *either* you probably
+want to use the regular `property(name, value, type)` method.
+If you don't define `type` its assumed to be 'number'; 'integer' is valid as well.
+
+One fun fact: the *initial* value of the property defined with propertyRange is clamped to
+be within the min/max range that the params define, so it may not be the one you feed to the `propertyRange` method. 
+
+### method: `watch(name: string, onChange: fn, onError:fn, , onDone: fn)` : ValueStream
+
+This special subscription focuses on change to a single value; onChange receives an object `{value, prev}`
+every time its value is changed.
+
+A variant of this  method, `watchFlat('name', (value, prev) => {...})` 
+passes two arguments, the current and previous value, for each change.
+
+watch also accepts a string that is the name of a method as a second argument as in
+`myStream.watch('x', 'calcDistance).watch('y', 'calcDistance')`. 
 
 ### method: `method(name, fn, transact)` : stream 
 
@@ -255,7 +283,118 @@ on the `._methods` property(a Map).
 * `this` doesn't have any defined meaning and should not 
   be used inside a method's function. 
 
-## property: my 
+### broadcast(changedFieldName: string)
+
+methods do not *automatically* trigger updates to subscribers.
+*changes* to watched values trigger updates. specifically 
+setting a value to a streams' property. This means that simply
+modifying an array or object stored in a property will not
+trigger a change to listeners; its up to you to tell subscribers
+that a complex property has been modified. 
+
+the broadcast method does that. 
+
+note - in many cases using immutable strategies -- cloning
+the complex object and setting the property to the clone --
+may be healthier for downstream observation; but in cases 
+where you are storing complex object with references that 
+make them difficult to clone broadcast gives you the option
+of pushing changes to subscribers yourself. 
+
+```javascript
+  const arrayStream = new ValueStream('arrayStream')
+    .property('list', [])
+    .method('push', (s, v) => {
+      s.my.list.push(v);
+    })
+    .method('pushBroadcast', (s, v) => {
+      s.do.push(v);
+      s.broadcast('list');
+    });
+
+  const changes = monitorMulti(arrayStream);
+  arrayStream.subscribe(({ value }) => {
+    console.log('values', JSON.stringify(value));
+  });
+
+  arrayStream.do.push(1);
+  arrayStream.do.push(2);
+  arrayStream.do.push(3);
+  arrayStream.do.pushBroadcast(4);
+  arrayStream.do.push(5);
+
+/*
+-- triggered by the creation of the subscription
+values {"list":[]}
+-- triggered by the lone call to pushBroadcast
+values {"list":[1,2,3,4]}
+*/
+
+```
+
+### method `filtered(propName:str...propName:str) : ValueStream`
+
+Creates a ValueStream that has as its property a subset of the
+properties defined in the source ValueStream. The returned ValueStream
+will respond ONLY to changes on the watched properties. This is useful
+if you want to watch to a targeted set of properties. 
+
+```javascript
+
+      const baseStream = new ValueStream('abcd')
+        .property('a', 1)
+        .property('b', 2)
+        .property('c', 3)
+        .property('d', 4)
+        .method('addAll', (s, n) => {
+          s.do.setA(s.my.a + n);
+          s.do.setB(s.my.b + n);
+          s.do.setC(s.my.c + n);
+          s.do.setD(s.my.d + n);
+        }, true);
+
+      const filteredStream = baseStream.filtered('a', 'd');
+      filteredStream.subscribe(({value}) => {console.log(value);});
+
+      // #1 set an unfilterd value
+      baseStream.do.setB(5);
+
+      // #2 set a filtered value
+
+      baseStream.do.setA(10);
+
+      // #3 testing watching a transcription locked action
+
+      baseStream.do.addAll(5);
+
+/**
+ -- broadcast immediately on subscription
+ filtered update: { a: 1, d: 4 }
+ -- broadcast after #2
+ filtered update: { a: 10, d: 4 }
+ -- broadcast after #3
+ filtered update: { a: 15, d: 9 }
+
+*/
+
+```
+
+note in the above example only two of the three actions 
+on the source stream trigger messages. action #1 is ignored
+by the subscription. Also addAll is transcription locked so 
+act 3 only triggers a single update in the filtered stream.
+
+`filtered(..)` returns a full and complete ValueStream;
+its properties are *the same* as the sources' - changing 
+a filtered ValueStream's property values will change the parents'
+value! 
+
+The filtered stream does not have any methods; 
+It is not good practice to add any methods to the returned
+stream or do anything other than subscribing to it.  
+
+## Properties
+### property: my 
 
 This is a proxy getter where Proxies are available. The efficiency of .my as a property
 is it allows you to pluck a single sub-value without serializing the entire tree. 
@@ -264,3 +403,81 @@ is desired.
 
 Where they are not (i.e., IE), and for single value streams, property.my is the same as 
 property.value.
+
+## Events
+### `on(triggerName, (stream, value) => {...})`
+### `emit(triggerName, value)`
+
+ValueStream is an event emitter. 
+They exist to allow open/indirect coupling of methods
+to situations; for instance, emitting a "sizeChange" event when
+width or height change or emitting a derived value like the sum of 
+an array property when its contents change. 
+
+Events are useful when you want one (or many) methods/computations
+to trigger when one or more than one property change; for instance,
+in a form stream, if you want to re-validate the entire form if any
+field changes. 
+
+The value emitted is up to the user to define - you don't actually
+have to emit any specific value, or care what value is emitted;
+also, you can emit more than one value.
+
+Lastly, you can hook an emitted event directly to a method.
+As an alternative to the below pattern, you could achieve the same 
+aim by calling `.on('pointsChanged', 'calcDistance')`.
+
+in the example below we use events to trigger/observe when
+any point has changed. 
+
+````javascript
+
+      const segment = new ValueStream('segment')
+        .property('x1', 0, 'number')
+        .property('y1', 0, 'number')
+        .property('x2', 0, 'number')
+        .property('y2', 0, 'number')
+        .property('distance', 0, 'number')
+        .method('setP1', (s, x, y) => {
+          s.do.setX1(x);
+          s.do.setY1(y);
+        }, true)
+        .method('setP2', (s, x, y) => {
+          s.do.setX2(x);
+          s.do.setY2(y);
+        }, true)
+        .method('calcDistance', (s) => {
+          const xdSquared = (s.my.x1 - s.my.x2) ** 2;
+          const ydSquared = (s.my.y1 - s.my.y2) ** 2;
+          s.do.setDistance(Math.sqrt(xdSquared + ydSquared));
+        })
+        .watchFlat('x1', (s) => {
+          s.emit('pointsChanged');
+        })
+        .watchFlat('y1', (s) => {
+          s.emit('pointsChanged');
+        })
+        .watchFlat('x2', (s) => {
+          s.emit('pointsChanged');
+        })
+        .watchFlat('y2', (s) => {
+          s.emit('pointsChanged');
+        })
+        .on('pointsChanged', (ss) => {
+          ss.do.calcDistance();
+        });
+
+      segment.subscribe((s) => {
+        console.log('distance is now:', s.my.distance);
+      });
+
+      segment.do.setP1(2, 4);
+      segment.do.setP2(10, 10);
+
+/**
+distance is now: 0
+distance is now: 4.47213595499958
+distance is now: 10
+*/
+
+```` 

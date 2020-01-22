@@ -179,18 +179,32 @@ of a stream. In ValueStream, OTOH, any number of errors can be emitted
 
 called when a ValueStream is `complete()`d. It has no parameters. 
 
+### method: `get(name:string): value`
+
+This is the best way to get a value from a child property(defined by `property(...)`). 
+
+### method `set(name: string, value)`
+
+Assigns a value to a child property and triggers a broadcast update to all subscribers.
+If the property has a defined type/test, and the value is invalid, triggers an error
+and it leaves the streams' value unchanged.
+
 ### method `complete()` :void
 
 stops the ValueStream, preventing further data from being emitted. 
 
-## Events
+# Advanced Features
 
-ValueStream is an event emitter as well. This is largely identical to 
-the node eventEmitter pattern, but for economy of dependencies its 
-implemented with streams.
+There is another ReadMe for optional features you don't really need
+to get off the ground with ValueStreams, but are useful for complex "power use"
+of value streams. These include:
 
-Events are not data and don't have any direct coupling to the values 
-ValueStream monitors. They exist to allow open/indirect coupling of methods
-to situations; for instance, emitting a "sizeChange" event when
-width or height change or emitting a derived value like the sum of 
-an array property when its contents change.  
+* `broadcast(name)` - triggers the update of a value as if it had been set
+* `emit(name, value)` - emits a watchable value
+* `on(name, value)` - watches for a specific named emission
+* `filter(propertyName,...propertyName)` - creates a copy of this stream for a specified subset of properties.
+* `my (property)` - an efficient way to get a property; alternative to `get(propertyName)`. 
+* `watch(propertyName, ({value, prev}) => {...})` - 
+
+None of these advanced systems is required to use 
+ValueStream, so they have been displaced to the [`ADVANCED_README.md`](./ADVANCED_README.md) file.
