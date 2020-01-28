@@ -30,6 +30,6 @@ added filtered(prop...prop)
 
 Removed peerDependency, HOC utility from source.
 
-## 3.1.9
+## 3.1.10
 
 fixed emitter bug / do
