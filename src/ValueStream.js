@@ -131,7 +131,7 @@ class ValueStream {
           this._emitterListeners.get(name)
             .forEach((listener) => {
               if (is.string(listener) && this.do[listener]) {
-                this.do(listener, ...args);
+                this.do[listener](...args);
               }
               if (is.fn(listener)) {
                 listener(this, ...args);
@@ -435,19 +435,19 @@ class ValueStream {
 
     const typeTest = typeTestFor(type, name);
 
-    const test = (value, nameStr) => {
-      const error = typeTest(value);
+    const test = (nextValue, nameStr) => {
+      const error = typeTest(nextValue);
       if (error) {
         console.log('propertyRange - returning ', error);
         return error;
       }
       if (min !== Number.NEGATIVE_INFINITY) {
-        if (!is.ge(value, min)) {
+        if (!is.ge(nextValue, min)) {
           return `${nameStr} must be >= ${min}`;
         }
       }
       if (max !== Number.POSITIVE_INFINITY) {
-        if (!is.le(value, max)) {
+        if (!is.le(nextValue, max)) {
           return `${nameStr} must be <= ${max}`;
         }
       }
