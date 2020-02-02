@@ -405,6 +405,37 @@ class ValueStream {
       return stream.get(name);
     });
 
+    // property alter method
+    const toName = capFirst(name, 'to');
+    this.method(toName, (stream, method) => {
+      if (is.function(method)) {
+        let result;
+        try {
+          result = method(stream.get(name));
+        } catch (error) {
+          this.emitError({
+            error,
+            method,
+            name: toName,
+          });
+          return stream.get(name);
+        }
+        if (this.hasTest()) {
+          const error = this.test(value, this.name, is, this);
+          if (error) {
+            this.emitError({
+              error,
+              value,
+              name: toName,
+            });
+            return stream.get(name);
+          }
+        }
+        this.set(name, result);
+      }
+      return stream.get(name);
+    });
+
     return this;
   }
 
@@ -808,7 +839,7 @@ class ValueStream {
     if (is.string(method)) {
       return (...args) => this.do[method](...args);
     }
-    return method;
+    return (...args) => method(this, ...args);
   }
 
   watch(alpha, beta, gamma, delta) {
@@ -822,9 +853,9 @@ class ValueStream {
 
   watchFlat(alpha, beta, gamma, delta) {
     if (this.isSingleValue) {
-      this.watchStream().subscribe(({ value, prev }) => this._interpret(alpha)(this, value, prev, this.name), beta, gamma);
+      this.watchStream().subscribe(({ value, prev }) => this._interpret(alpha)(value, prev, this.name), beta, gamma);
     } else {
-      this.watchStream(alpha).subscribe(({ value, prev }) => this._interpret(beta)(this, value, prev, alpha), gamma, delta);
+      this.watchStream(alpha).subscribe(({ value, prev }) => this._interpret(beta)(value, prev, alpha), gamma, delta);
     }
     return this;
   }

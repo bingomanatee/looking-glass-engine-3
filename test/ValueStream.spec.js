@@ -713,7 +713,7 @@ tap.test(p.name, (suite) => {
           const stream = makeSingleValueStream();
           const changes = [];
 
-          stream.watch((data) => changes.push(data));
+          stream.watch((s, data) => changes.push(data));
 
           wsvOnSet.same(changes, [], 'starts without changes');
 
@@ -728,7 +728,7 @@ tap.test(p.name, (suite) => {
           const stream = makeSingleValueStream();
           const changes = [];
 
-          stream.watch((data) => changes.push(data));
+          stream.watch((s, data) => changes.push(data));
 
           stream.do.inc();
 
@@ -741,7 +741,7 @@ tap.test(p.name, (suite) => {
           const stream = makeSingleValueStream();
           const changes = [];
 
-          stream.watch((data) => changes.push(data));
+          stream.watch((s, data) => changes.push(data));
 
           stream.do.incDouble();
 
@@ -760,7 +760,7 @@ tap.test(p.name, (suite) => {
 
         const changes = [];
 
-        stream.watch('x', (change) => changes.push(change));
+        stream.watch('x', (s, change) => changes.push(change));
 
         wmv.same(changes, [], 'starts empty');
 
@@ -817,6 +817,24 @@ tap.test(p.name, (suite) => {
 
         wsv.end();
       });
+
+      w.test('multiple events on same key', (me) => {
+        const stream = coordFactory();
+        const result = monitorMulti(stream);
+
+        stream.property('xUpdatedMessages', [])
+          .method('xUpdatedA', (s) => s.do.setXUpdatedMessages([...s.my.xUpdatedMessages, { x: s.my.x, from: 'A' }]))
+          .method('xUpdatedB', (s) => s.do.setXUpdatedMessages([...s.my.xUpdatedMessages, { x: s.my.x, from: 'B' }]))
+          .watch('x', 'xUpdatedA')
+          .watch('x', 'xUpdatedB');
+
+        me.same(stream.my.xUpdatedMessages, []);
+        stream.do.setX(10);
+        console.log('messages: ', JSON.stringify(stream.my.xUpdatedMessages));
+        me.same(stream.my.xUpdatedMessages, [{ x: 10, from: 'A' }, { x: 10, from: 'B' }]);
+        me.end();
+      });
+
       w.end();
     });
 

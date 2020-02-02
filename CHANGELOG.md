@@ -33,3 +33,7 @@ Removed peerDependency, HOC utility from source.
 ## 3.1.10
 
 fixed emitter bug / do
+
+## 3.1.11
+
+made watchFlat more consistent. 
