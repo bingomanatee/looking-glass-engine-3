@@ -830,8 +830,141 @@ tap.test(p.name, (suite) => {
 
         me.same(stream.my.xUpdatedMessages, []);
         stream.do.setX(10);
-        console.log('messages: ', JSON.stringify(stream.my.xUpdatedMessages));
         me.same(stream.my.xUpdatedMessages, [{ x: 10, from: 'A' }, { x: 10, from: 'B' }]);
+        me.end();
+      });
+
+      w.end();
+    });
+
+    testValueStream.test('watchFlat', (w) => {
+      w.test('single value', (wsv) => {
+        const makeSingleValueStream = () => {
+          const stream = new ValueStream('count', 0, 'number')
+            .method('incDouble', (stream) => {
+              stream.do.inc();
+              stream.do.double();
+            }, true)
+            .method('inc', (stream) => {
+              stream.set(stream.value + 1);
+            })
+            .method('double', (stream) => {
+              stream.set(stream.value * 2);
+            });
+
+          return stream;
+        };
+
+        wsv.test('on set', (wsvOnSet) => {
+          const stream = makeSingleValueStream();
+          const changes = [];
+
+          stream.watchFlat((s, value, prev) => changes.push(value, prev));
+
+          wsvOnSet.same(changes, [], 'starts without changes');
+
+          stream.set(3);
+          wsvOnSet.same(changes, [3, 0]);
+
+          stream.set(5);
+          wsvOnSet.same(changes, [3, 0, 5, 3]);
+          stream.complete();
+          wsvOnSet.end();
+        });
+
+        wsv.test('on method', (wsvOnMethod) => {
+          const stream = makeSingleValueStream();
+          const changes = [];
+
+          stream.watchFlat((s, value, prev) => changes.push(value, prev));
+
+          stream.do.inc();
+          wsvOnMethod.same(changes, [1, 0]);
+
+          stream.do.inc();
+          wsvOnMethod.same(changes, [1, 0, 2, 1]);
+
+          stream.complete();
+          wsvOnMethod.end();
+        });
+
+        wsv.test('on method, transactional', (wsvOnMethod) => {
+          const stream = makeSingleValueStream();
+          const changes = [];
+
+          stream.watchFlat((s, value, prev) => changes.push(value, prev));
+
+          stream.do.incDouble();
+
+          wsvOnMethod.same(changes, [1, 0, 2, 1]);
+          wsvOnMethod.end();
+        });
+
+        wsv.end();
+      });
+
+      w.test('multi value', (wmv) => {
+        const stream = coordFactory();
+
+        const changes = [];
+        stream.watchFlat('x', (s, x, prev) => changes.push(x, prev));
+
+        wmv.same(changes, [], 'starts empty');
+
+        stream.do.setY(2);
+
+        wmv.same(changes, [], 'ignores other properties');
+
+        stream.do.add(2, 2);
+
+        wmv.same(changes, [2, 0], 'notices x change');
+
+        stream.set('x', 3);
+        wmv.same(changes, [2, 0, 3, 2], 'notices x change from set');
+
+        stream.set('x', 3);
+        wmv.same(changes, [2, 0, 3, 2], 'ignores non change');
+
+        stream.complete();
+        wmv.end();
+      });
+
+      w.test('string listener', (wsv) => {
+        const stream = coordFactory();
+
+        stream.property('xHistory', [], 'array')
+          .method('updateXHistory', (s, value, prev) => {
+            s.do.setXHistory([...s.my.xHistory, value, prev]);
+          });
+
+        stream.watchFlat('x', 'updateXHistory');
+
+        wsv.same(stream.my.xHistory, []);
+
+        stream.do.add(2, 4);
+        wsv.same(stream.my.xHistory, [2, 0]);
+
+        stream.do.add(3, 5);
+        wsv.same(stream.my.xHistory, [2, 0, 5, 2]);
+
+        stream.do.setX(20);
+        wsv.same(stream.my.xHistory, [2, 0, 5, 2, 20, 5]);
+
+        wsv.end();
+      });
+
+      w.test('multiple events on same key', (me) => {
+        const stream = coordFactory();
+
+        stream.property('xUpdatedMessages', [])
+          .method('xUpdatedA', (s, x, prev) => s.do.setXUpdatedMessages([...s.my.xUpdatedMessages, { x, prev, from: 'A' }]))
+          .method('xUpdatedB', (s, x, prev) => s.do.setXUpdatedMessages([...s.my.xUpdatedMessages, { x, prev, from: 'B' }]))
+          .watchFlat('x', 'xUpdatedA')
+          .watchFlat('x', 'xUpdatedB');
+
+        me.same(stream.my.xUpdatedMessages, []);
+        stream.do.setX(10);
+        me.same(stream.my.xUpdatedMessages, [{ x: 10, prev: 0, from: 'A' }, { x: 10, prev: 0, from: 'B' }]);
         me.end();
       });
 
