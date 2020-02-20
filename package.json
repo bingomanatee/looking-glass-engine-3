@@ -1,6 +1,6 @@
 {
   "name": "@wonderlandlabs/looking-glass-engine",
-  "version": "3.1.11",
+  "version": "3.1.12",
   "description": "A state system for React and more",
   "main": "lib/index.js",
   "module": "es/index.js",
@@ -9,6 +9,7 @@
     "lib",
     "umd",
     "CHANGELOG.md",
+    "roolup.config.js",
     "src/*"
   ],
   "scripts": {
