@@ -271,12 +271,12 @@ class ValueStream {
           return { name: this.name, value };
         };
 
-        if (SCALAR_TYPES.includes(this.type)) {
+        this.__changes = this._valueStream.pipe(map(changeMap));
+    /*    if (SCALAR_TYPES.includes(this.type)) {
           // suppress updates that do not change the value
           this.__changes = this._valueStream.pipe(distinct(), map(changeMap));
         } else {
-          this.__changes = this._valueStream.pipe(map(changeMap));
-        }
+        }*/
       } else {
         this.__changes = new Subject(); // it is children's job to push changes into the subject
       }

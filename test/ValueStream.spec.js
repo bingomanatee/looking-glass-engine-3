@@ -724,6 +724,22 @@ tap.test(p.name, (suite) => {
           wsvOnSet.end();
         });
 
+        wsv.test('multiple changes', (wsvMulti) => {
+          const stream = makeSingleValueStream();
+          const changes = [];
+
+          stream.watch((s, data) => changes.push(data.value));
+
+          stream.set(3);
+          stream.set(4);
+          stream.set(5);
+          stream.set(6);
+
+          wsvMulti.same(changes, [3, 4, 5, 6]);
+          stream.complete();
+          wsvMulti.end();
+        });
+
         wsv.test('on method', (wsvOnMethod) => {
           const stream = makeSingleValueStream();
           const changes = [];
@@ -781,14 +797,6 @@ tap.test(p.name, (suite) => {
         {
           name: 'x', value: 3, source: 'x', prev: 2, target: 'coord',
         }], 'notices x change from set');
-
-        stream.set('x', 3);
-        wmv.same(changes, [{
-          name: 'x', value: 2, source: 'x', prev: 0, target: 'coord',
-        },
-        {
-          name: 'x', value: 3, source: 'x', prev: 2, target: 'coord',
-        }], 'ignores non-change');
 
         stream.complete();
         wmv.end();
@@ -921,9 +929,6 @@ tap.test(p.name, (suite) => {
 
         stream.set('x', 3);
         wmv.same(changes, [2, 0, 3, 2], 'notices x change from set');
-
-        stream.set('x', 3);
-        wmv.same(changes, [2, 0, 3, 2], 'ignores non change');
 
         stream.complete();
         wmv.end();

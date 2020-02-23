@@ -37,3 +37,7 @@ fixed emitter bug / do
 ## 3.1.11
 
 made watchFlat more consistent. 
+
+## 3.1.12
+
+removed non-change optimization for watches - problematic
